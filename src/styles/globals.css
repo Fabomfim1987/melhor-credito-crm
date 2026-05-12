@@ -1,0 +1,25 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --mc-primary: #07294a;
+  --mc-mid: #1F3864;
+  --mc-blue: #2E75B6;
+  --mc-light: #D6E4F0;
+  --mc-green: #16a34a;
+  --mc-red: #dc2626;
+  --mc-amber: #d97706;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background-color: #f1f5f9;
+  color: #1e293b;
+}
