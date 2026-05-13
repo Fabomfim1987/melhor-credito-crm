@@ -700,7 +700,9 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
   },[])
 
   const hoje=new Date()
-  const mesRef=`${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`
+  const [mesRefMes, setMesRefMes]=useState(String(hoje.getMonth()+1).padStart(2,'0'))
+  const [mesRefAno, setMesRefAno]=useState(String(hoje.getFullYear()))
+  const mesRef=`${mesRefMes}/${mesRefAno}`
 
   const processar=async()=>{
     setProcessando(true);setLog([]);setResultado(null)
@@ -775,7 +777,19 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
     <div style={{display:'flex',flexDirection:'column',gap:10}}>
       <div style={{background:'#fff',borderRadius:10,border:'0.5px solid #e8ecf0',padding:'14px 16px'}}>
         <div style={{fontSize:13,fontWeight:600,color:'#0f172a',marginBottom:6}}>Atualizar dados de produção</div>
-        <div style={{fontSize:12,color:'#64748b',lineHeight:1.6,marginBottom:12}}>Status CRM e observações preservados. Mês de referência: <strong>{mesRef}</strong></div>
+        <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12,flexWrap:'wrap'}}>
+          <span style={{fontSize:12,color:'#64748b'}}>Mês de referência:</span>
+          <select value={mesRefMes} onChange={e=>setMesRefMes(e.target.value)} style={{padding:'5px 8px',borderRadius:7,border:'1px solid #e2e8f0',fontSize:13,background:'#fff',cursor:'pointer'}}>
+            {[['01','Janeiro'],['02','Fevereiro'],['03','Março'],['04','Abril'],['05','Maio'],['06','Junho'],
+              ['07','Julho'],['08','Agosto'],['09','Setembro'],['10','Outubro'],['11','Novembro'],['12','Dezembro']].map(([v,l])=>(
+              <option key={v} value={v}>{l}</option>
+            ))}
+          </select>
+          <select value={mesRefAno} onChange={e=>setMesRefAno(e.target.value)} style={{padding:'5px 8px',borderRadius:7,border:'1px solid #e2e8f0',fontSize:13,background:'#fff',cursor:'pointer'}}>
+            {['2025','2026','2027'].map(a=><option key={a}>{a}</option>)}
+          </select>
+          <span style={{fontSize:12,color:'#07294a',fontWeight:600,background:'#EBF5FB',padding:'4px 10px',borderRadius:6}}>{mesRef}</span>
+        </div>
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap'}}>
           <span style={{fontSize:11,color:'#64748b',fontWeight:500}}>Dias úteis:</span>
           <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
