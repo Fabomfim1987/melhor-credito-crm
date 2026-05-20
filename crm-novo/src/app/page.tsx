@@ -282,12 +282,23 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[]
   const [fStatus,setFStatus]=useState('')
   const [fPerfil,setFPerfil]=useState('')
 
-  const hoje=new Date()
-  const mesesHeader=Array.from({length:3},(_,i)=>{
-    const d=new Date(hoje.getFullYear(),hoje.getMonth()-2+i,1)
+  // Header de meses: usar os meses reais que vêm do backend (alinhados com meses_display)
+  const mesesHeader=(()=>{
+    const md=parceiros[0]?.meses_display||[]
     const nomes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
-    return `${nomes[d.getMonth()+1]}/${String(d.getFullYear()).slice(2)}`
-  })
+    if (md.length===3) {
+      return md.map(m=>{
+        const [mm,yy]=m.mes.split('/').map(Number)
+        return `${nomes[mm]}/${String(yy).slice(2)}`
+      })
+    }
+    // Fallback: 3 últimos meses baseado em hoje
+    const hoje=new Date()
+    return Array.from({length:3},(_,i)=>{
+      const d=new Date(hoje.getFullYear(),hoje.getMonth()-2+i,1)
+      return `${nomes[d.getMonth()+1]}/${String(d.getFullYear()).slice(2)}`
+    })
+  })()
 
   const filtrados=parceiros.filter(p=>{
     if (lojaFiltro) {
