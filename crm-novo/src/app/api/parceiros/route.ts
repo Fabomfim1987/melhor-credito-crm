@@ -18,12 +18,26 @@ export async function GET(req: NextRequest) {
   const vals = await redis.mget(...keys)
   const parceiros = vals.filter(Boolean).map(v => JSON.parse(v!)).sort((a,b) => b.proj_prod - a.proj_prod)
 
+  // Pegar o mês mais recente uploadado como referência e voltar 3 meses
   const todosSlots = new Set<string>()
   parceiros.forEach(p => { if (p.historico_mensal) Object.keys(p.historico_mensal).forEach(k => todosSlots.add(k)) })
-  const ultimos3 = Array.from(todosSlots).sort((a,b) => {
+  const slotsOrdenados = Array.from(todosSlots).sort((a,b) => {
     const [ma,ya]=a.split('/').map(Number); const [mb,yb]=b.split('/').map(Number)
     return (ya*100+ma)-(yb*100+mb)
-  }).slice(-3)
+  })
+
+  // Mês mais recente uploadado
+  const ultimoSlot = slotsOrdenados[slotsOrdenados.length-1]
+  let ultimos3: string[] = []
+  if (ultimoSlot) {
+    const [m,y] = ultimoSlot.split('/').map(Number)
+    // Gerar 3 meses: 2 anteriores + o atual
+    for (let i = 2; i >= 0; i--) {
+      let nm = m - i, ny = y
+      while (nm <= 0) { nm += 12; ny -= 1 }
+      ultimos3.push(`${String(nm).padStart(2,'0')}/${ny}`)
+    }
+  }
 
   return NextResponse.json(parceiros.map(p => ({
     ...p,
