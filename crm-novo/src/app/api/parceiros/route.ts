@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
   const vals = await redis.mget(...keys)
   const parceiros = vals.filter(Boolean).map(v => JSON.parse(v!)).sort((a,b) => b.proj_prod - a.proj_prod)
 
-  // Pegar o mês mais recente uploadado como referência e voltar 3 meses
+  // Mostrar sempre os 3 meses cronologicamente mais recentes que existem nos dados
   const todosSlots = new Set<string>()
   parceiros.forEach(p => { if (p.historico_mensal) Object.keys(p.historico_mensal).forEach(k => todosSlots.add(k)) })
   const slotsOrdenados = Array.from(todosSlots).sort((a,b) => {
@@ -26,12 +26,11 @@ export async function GET(req: NextRequest) {
     return (ya*100+ma)-(yb*100+mb)
   })
 
-  // Mês mais recente uploadado
-  const ultimoSlot = slotsOrdenados[slotsOrdenados.length-1]
+  // Pegar o MAIOR mês cronológico e voltar 3 meses a partir dele
+  const maiorSlot = slotsOrdenados[slotsOrdenados.length-1]
   let ultimos3: string[] = []
-  if (ultimoSlot) {
-    const [m,y] = ultimoSlot.split('/').map(Number)
-    // Gerar 3 meses: 2 anteriores + o atual
+  if (maiorSlot) {
+    const [m,y] = maiorSlot.split('/').map(Number)
     for (let i = 2; i >= 0; i--) {
       let nm = m - i, ny = y
       while (nm <= 0) { nm += 12; ny -= 1 }
@@ -51,11 +50,17 @@ export async function PATCH(req: NextRequest) {
 
   if (body.parceiros_bulk) {
     const mesRef: string = body.mes_ref
+    // Blindagem: rejeitar upload sem mes_ref válido (evita slot "undefined")
+    if (!mesRef || !/^\d{2}\/\d{4}$/.test(mesRef)) {
+      return NextResponse.json({ error: 'mes_ref inválido ou ausente', recebido: mesRef }, { status: 400 })
+    }
     for (const p of body.parceiros_bulk) {
       const key = `parceiro:${p.id}`
       const existing = await redis.get(key)
       const prev = existing ? JSON.parse(existing) : {}
       const historico = prev.historico_mensal || {}
+      // Limpar qualquer slot inválido herdado (undefined, null, etc.)
+      Object.keys(historico).forEach(k => { if (!/^\d{2}\/\d{4}$/.test(k)) delete historico[k] })
       historico[mesRef] = { prod: p.abr_prod||0, dig: p.abr_dig||0 }
       await redis.set(key, JSON.stringify({
         ...p,
@@ -65,7 +70,7 @@ export async function PATCH(req: NextRequest) {
         historico_mensal: historico,
       }))
     }
-    return NextResponse.json({ ok: true, count: body.parceiros_bulk.length })
+    return NextResponse.json({ ok: true, count: body.parceiros_bulk.length, mes: mesRef })
   }
 
   if (body.id && body.status !== undefined) {
