@@ -80,6 +80,112 @@ function StatusPicker({current,onChange}:{current:StatusCRM;onChange:(s:StatusCR
 }
 
 // ── FICHA ──────────────────────────────────────────────────────────────────
+function EvolucaoDiaria({historico}:{historico:Record<string,{prod:number;dig:number}>}) {
+  const dias = Object.keys(historico).sort()
+  if (dias.length < 1) {
+    return (
+      <div style={{padding:'12px 22px',borderBottom:'0.5px solid #f1f5f9'}}>
+        <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:6}}>Evolução diária — mês corrente</div>
+        <div style={{fontSize:11,color:'#94a3b8',fontStyle:'italic'}}>Ainda sem snapshots. Após o próximo upload do mês corrente, os dados começam a aparecer aqui.</div>
+      </div>
+    )
+  }
+
+  // Calcular deltas (produção/digitação do dia)
+  const linhas = dias.map((d, i) => {
+    const ant = i > 0 ? historico[dias[i-1]] : { prod: 0, dig: 0 }
+    return {
+      data: d,
+      prod_acum: historico[d].prod,
+      dig_acum: historico[d].dig,
+      prod_dia: historico[d].prod - ant.prod,
+      dig_dia: historico[d].dig - ant.dig,
+    }
+  })
+
+  // Detectar alerta: últimos N dias com prod_dia = 0 OU dig_dia = 0
+  const ultimos3 = linhas.slice(-3)
+  const semProd = ultimos3.length >= 3 && ultimos3.every(l => l.prod_dia <= 0)
+  const semDig = ultimos3.length >= 3 && ultimos3.every(l => l.dig_dia <= 0)
+
+  // Dados para o gráfico (SVG simples)
+  const W = 460, H = 100, PAD = 8
+  const maxProd = Math.max(...linhas.map(l => l.prod_dia), 1)
+  const maxDig = Math.max(...linhas.map(l => l.dig_dia), 1)
+  const xStep = linhas.length > 1 ? (W - PAD*2) / (linhas.length - 1) : 0
+
+  const pathProd = linhas.map((l, i) => {
+    const x = PAD + i * xStep
+    const y = H - PAD - (l.prod_dia / maxProd) * (H - PAD*2)
+    return `${i===0?'M':'L'} ${x} ${y}`
+  }).join(' ')
+
+  const pathDig = linhas.map((l, i) => {
+    const x = PAD + i * xStep
+    const y = H - PAD - (l.dig_dia / maxDig) * (H - PAD*2)
+    return `${i===0?'M':'L'} ${x} ${y}`
+  }).join(' ')
+
+  const fmtDataCurto = (iso:string) => {
+    const [, m, d] = iso.split('-')
+    return `${d}/${m}`
+  }
+
+  return (
+    <div style={{padding:'12px 22px',borderBottom:'0.5px solid #f1f5f9'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:8}}>
+        <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em'}}>Evolução diária — {linhas.length} dia{linhas.length>1?'s':''}</div>
+        {(semProd||semDig)&&(
+          <span style={{fontSize:10,fontWeight:700,color:'#c2410c',background:'#fff7ed',padding:'3px 8px',borderRadius:8,border:'0.5px solid #fed7aa'}}>
+            ⚠ {semProd&&semDig?'3 dias sem produzir/digitar':semProd?'3 dias sem produzir':'3 dias sem digitar'}
+          </span>
+        )}
+      </div>
+
+      {linhas.length >= 2 && (
+        <div style={{background:'#f8fafc',borderRadius:8,padding:'10px 8px',marginBottom:10,border:'0.5px solid #f1f5f9'}}>
+          <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',display:'block'}}>
+            <path d={pathDig} stroke="#94a3b8" strokeWidth="1.5" fill="none" strokeDasharray="3,3"/>
+            <path d={pathProd} stroke="#7c3aed" strokeWidth="2" fill="none"/>
+            {linhas.map((l, i) => {
+              const x = PAD + i * xStep
+              const yProd = H - PAD - (l.prod_dia / maxProd) * (H - PAD*2)
+              return <circle key={i} cx={x} cy={yProd} r="2.5" fill="#7c3aed"/>
+            })}
+          </svg>
+          <div style={{display:'flex',gap:14,marginTop:6,fontSize:10,color:'#64748b'}}>
+            <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:14,height:2,background:'#7c3aed'}}/>Produção/dia</span>
+            <span style={{display:'flex',alignItems:'center',gap:4}}><span style={{width:14,height:2,background:'#94a3b8',borderTop:'1px dashed'}}/>Digitação/dia</span>
+          </div>
+        </div>
+      )}
+
+      <div style={{maxHeight:200,overflowY:'auto',border:'0.5px solid #f1f5f9',borderRadius:8}}>
+        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+          <thead style={{background:'#f8fafc',position:'sticky',top:0}}>
+            <tr>
+              <th style={{textAlign:'left',padding:'6px 9px',color:'#64748b',fontWeight:600}}>Data</th>
+              <th style={{textAlign:'right',padding:'6px 9px',color:'#64748b',fontWeight:600}}>Prod. dia</th>
+              <th style={{textAlign:'right',padding:'6px 9px',color:'#64748b',fontWeight:600}}>Dig. dia</th>
+              <th style={{textAlign:'right',padding:'6px 9px',color:'#94a3b8',fontWeight:600}}>Acum. prod.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {linhas.slice().reverse().map((l, i) => (
+              <tr key={l.data} style={{borderTop:'0.5px solid #f1f5f9'}}>
+                <td style={{padding:'6px 9px',color:'#0f172a',fontWeight:i===0?700:400}}>{fmtDataCurto(l.data)}{i===0?' · hoje':''}</td>
+                <td style={{padding:'6px 9px',textAlign:'right',color:l.prod_dia>0?'#0f172a':'#cbd5e1',fontWeight:l.prod_dia>0?600:400}}>{l.prod_dia>0?brl(l.prod_dia):'—'}</td>
+                <td style={{padding:'6px 9px',textAlign:'right',color:l.dig_dia>0?'#0f172a':'#cbd5e1',fontWeight:l.dig_dia>0?600:400}}>{l.dig_dia>0?brl(l.dig_dia):'—'}</td>
+                <td style={{padding:'6px 9px',textAlign:'right',color:'#94a3b8'}}>{brl(l.prod_acum)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  )
+}
+
 function Ficha({p,onClose,onUpdate}:{p:Parceiro;onClose:()=>void;onUpdate:(p:Parceiro)=>void}) {
   const [obs,setObs]=useState('');const [autor,setAutor]=useState('Fabricio');const [saving,setSaving]=useState(false)
   const updateStatus=async(status:StatusCRM)=>{const r=await fetch('/api/parceiros',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id,status})});onUpdate(await r.json())}
@@ -150,6 +256,7 @@ function Ficha({p,onClose,onUpdate}:{p:Parceiro;onClose:()=>void;onUpdate:(p:Par
             </div>
           </div>
         )}
+        <EvolucaoDiaria historico={(p as any).historico_diario||{}}/>
         <div style={{padding:'12px 22px',borderBottom:'0.5px solid #f1f5f9'}}>
           <div style={{fontSize:10,fontWeight:700,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:8}}>Mês atual ({p.du}du) — Esperado vs Real</div>
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:8,marginBottom:12}}>
