@@ -214,7 +214,8 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
   const updateStatus=async(s:StatusCRM)=>{await fetch('/api/parceiros',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id,status:s})});onStatus(p.id,s)}
   const alerta=['Q1','Q2'].includes(p.quadrante)&&!p.status
   const qc=Q_CFG[p.quadrante]||Q_CFG['Q6']
-  const vsMedia=p.media_2025&&p.media_2025>0?((p.proj_prod-p.media_2025)/p.media_2025*100):null
+  const potencial=(p as any).potencial||Math.max(p.pico_2025||0, p.media_2025||0)
+  const vsPotencial=potencial>0?((p.proj_prod-potencial)/potencial*100):null
   const meses=p.meses_display||[]
   const m0=meses[0]||{prod:0,dig:0}
   const m1=meses[1]||{prod:p.mar_prod||0,dig:p.mar_dig||0}
@@ -233,8 +234,8 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
       </td>
       <td style={{padding:'9px 8px',textAlign:'center'}}><span style={{fontSize:10,fontWeight:700,padding:'3px 7px',borderRadius:4,background:qc.bg,color:qc.color}}>{p.quadrante}</span></td>
       <td style={{padding:'9px 10px',textAlign:'right'}}>
-        <div style={{fontSize:12,fontWeight:600,color:'#0f172a'}}>{p.media_2025?brl(p.media_2025):'—'}</div>
-        <div style={{fontSize:10,color:'#94a3b8'}}>pico {p.pico_2025?brl(p.pico_2025):'—'}</div>
+        <div style={{fontSize:12,fontWeight:700,color:'#0f172a'}}>{potencial>0?brl(potencial):'—'}</div>
+        <div style={{fontSize:10,color:'#94a3b8'}}>méd {p.media_2025?brl(p.media_2025):'—'}</div>
       </td>
       <ColMes prod={m0.prod} dig={m0.dig}/>
       <ColMes prod={m1.prod} dig={m1.dig}/>
@@ -246,13 +247,13 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
         ):<span style={{fontSize:11,color:'#e2e8f0'}}>—</span>}
       </td>
       <td style={{padding:'9px 10px',textAlign:'right'}}>
-        <div style={{fontSize:12,fontWeight:700,color:gapClr(p.gap_prod)}}>{p.gap_prod>=0?'+':''}{brl(p.gap_prod)}</div>
-        <div style={{fontSize:10,fontWeight:600,color:gapClr(p.gap_dig)}}>{p.gap_dig>=0?'+':''}{brl(p.gap_dig)} dig.</div>
+        <div style={{fontSize:12,fontWeight:700,color:p.gap_prod>0?'#dc2626':'#16a34a'}}>{p.gap_prod>0?'-':''}{brl(Math.abs(p.gap_prod))}</div>
+        <div style={{fontSize:10,color:'#94a3b8'}}>vs potencial</div>
       </td>
       <td style={{padding:'9px 10px',textAlign:'right'}}>
         <div style={{fontSize:12,fontWeight:700,color:varClr(p.var_prod)}}>{brl(p.proj_prod)}</div>
-        <div style={{fontSize:10,fontWeight:600,color:vsMedia!==null?varClr(vsMedia):varClr(p.var_prod)}}>
-          {vsMedia!==null?`${pct(vsMedia)} vs média`:`${pct(p.var_prod)} vs ant.`}
+        <div style={{fontSize:10,fontWeight:600,color:vsPotencial!==null?varClr(vsPotencial):'#94a3b8'}}>
+          {vsPotencial!==null?`${pct(vsPotencial)} vs pot.`:'—'}
         </div>
       </td>
       <td style={{padding:'9px 8px'}} onClick={e=>e.stopPropagation()}>
@@ -319,9 +320,9 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[]
   const limpo=busca||fProm||fQ||fStatus||fPerfil
 
   const headers=[
-    ['Parceiro','left'],['Q','center'],['Média 2025 / Pico','right'],
+    ['Parceiro','left'],['Q','center'],['Potencial / Média','right'],
     [mesesHeader[0],'right'],[mesesHeader[1],'right'],[mesesHeader[2],'right'],[`${mesesHeader[3]} ▶`,'right'],
-    ['Último Dia','right'],['Gap','right'],['Projeção','right'],
+    ['Último Dia','right'],['Falta','right'],['Projeção','right'],
     ['Status CRM','left'],['Obs','center'],['','center'],
   ]
 
