@@ -16,17 +16,17 @@ export async function GET(req: NextRequest) {
   if (keys.length === 0) return NextResponse.json([])
 
   const vals = await redis.mget(...keys)
-  const parceiros = vals.filter(Boolean).map(v => JSON.parse(v!)).sort((a,b) => b.proj_prod - a.proj_prod)
+  const parceirosRaw = vals.filter(Boolean).map(v => JSON.parse(v!))
 
-  // Mostrar sempre os 3 meses cronologicamente mais recentes que existem nos dados
+  // Determinar slots disponíveis
   const todosSlots = new Set<string>()
-  parceiros.forEach(p => { if (p.historico_mensal) Object.keys(p.historico_mensal).forEach(k => todosSlots.add(k)) })
+  parceirosRaw.forEach(p => { if (p.historico_mensal) Object.keys(p.historico_mensal).forEach(k => todosSlots.add(k)) })
   const slotsOrdenados = Array.from(todosSlots).sort((a,b) => {
     const [ma,ya]=a.split('/').map(Number); const [mb,yb]=b.split('/').map(Number)
     return (ya*100+ma)-(yb*100+mb)
   })
 
-  // Pegar o MAIOR mês cronológico e voltar 4 meses a partir dele
+  // Pegar os 4 últimos meses cronologicamente
   const maiorSlot = slotsOrdenados[slotsOrdenados.length-1]
   let ultimos4: string[] = []
   if (maiorSlot) {
@@ -38,11 +38,68 @@ export async function GET(req: NextRequest) {
     }
   }
 
-  return NextResponse.json(parceiros.map(p => ({
-    ...p,
-    meses_display: ultimos4.map(slot => ({ mes:slot, prod:p.historico_mensal?.[slot]?.prod||0, dig:p.historico_mensal?.[slot]?.dig||0 })),
-    ultimo_dia: p.ultimo_dia||null,
-  })))
+  // Dias úteis por mês 2026 (referência)
+  const DU_MES: Record<string,number> = {
+    '01/2026':21,'02/2026':19,'03/2026':21,'04/2026':20,'05/2026':20,
+    '06/2026':19,'07/2026':23,'08/2026':21,'09/2026':22,'10/2026':22,
+    '11/2026':19,'12/2026':22,
+  }
+
+  // Calcular du_decorridos para o mês atual (se for mês corrente)
+  const hoje = new Date()
+  const mesCorrente = `${String(hoje.getMonth()+1).padStart(2,'0')}/${hoje.getFullYear()}`
+  function duDecorridos(): number {
+    let count = 0
+    for (let d = 1; d <= hoje.getDate(); d++) {
+      const dt = new Date(hoje.getFullYear(), hoje.getMonth(), d)
+      const dow = dt.getDay()
+      if (dow !== 0 && dow !== 6) count++
+    }
+    return count || 1
+  }
+
+  // Enriquecer cada parceiro
+  const parceiros = parceirosRaw.map(p => {
+    const md = ultimos4.map(slot => ({ mes:slot, prod:p.historico_mensal?.[slot]?.prod||0, dig:p.historico_mensal?.[slot]?.dig||0 }))
+    const mesAtualSlot = ultimos4[3]
+    const prodAtual = md[3]?.prod || 0
+    const digAtual = md[3]?.dig || 0
+
+    // Projeção: se mês atual é o corrente, projeta; senão, é o realizado
+    let projProd = prodAtual
+    let projDig = digAtual
+    if (mesAtualSlot === mesCorrente) {
+      const duTotal = DU_MES[mesAtualSlot] || 20
+      const duDec = duDecorridos()
+      const fator = duTotal / duDec
+      projProd = prodAtual * fator
+      projDig = digAtual * fator
+    }
+
+    // Potencial: maior valor entre pico_2025 e os 4 meses recentes
+    const potencial = Math.max(
+      p.pico_2025 || 0,
+      ...md.map(m => m.prod || 0)
+    )
+
+    // Gap = potencial - mês atual (quanto falta para voltar ao pico)
+    const gapProd = potencial - prodAtual
+
+    return {
+      ...p,
+      meses_display: md,
+      ultimo_dia: p.ultimo_dia || null,
+      proj_prod: projProd,
+      proj_dig: projDig,
+      potencial,
+      gap_prod: gapProd,
+    }
+  })
+
+  // Ordenar por potencial (maior primeiro)
+  parceiros.sort((a,b) => (b.potencial||0) - (a.potencial||0))
+
+  return NextResponse.json(parceiros)
 }
 
 export async function PATCH(req: NextRequest) {
