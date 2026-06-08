@@ -216,9 +216,10 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
   const qc=Q_CFG[p.quadrante]||Q_CFG['Q6']
   const vsMedia=p.media_2025&&p.media_2025>0?((p.proj_prod-p.media_2025)/p.media_2025*100):null
   const meses=p.meses_display||[]
-  const m0=meses[0]||{prod:p.mar_prod||0,dig:p.mar_dig||0}
-  const m1=meses[1]||{prod:0,dig:0}
-  const m2=meses[2]||{prod:p.abr_prod||0,dig:p.abr_dig||0}
+  const m0=meses[0]||{prod:0,dig:0}
+  const m1=meses[1]||{prod:p.mar_prod||0,dig:p.mar_dig||0}
+  const m2=meses[2]||{prod:0,dig:0}
+  const m3=meses[3]||{prod:p.abr_prod||0,dig:p.abr_dig||0}
   const ud=p.ultimo_dia
   return (
     <tr style={{borderBottom:'0.5px solid #f1f5f9',background:alerta?'#fffbeb':'#fff',transition:'background 0.15s'}}
@@ -237,7 +238,8 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
       </td>
       <ColMes prod={m0.prod} dig={m0.dig}/>
       <ColMes prod={m1.prod} dig={m1.dig}/>
-      <ColMes prod={m2.prod} dig={m2.dig} destaque/>
+      <ColMes prod={m2.prod} dig={m2.dig}/>
+      <ColMes prod={m3.prod} dig={m3.dig} destaque/>
       <td style={{padding:'9px 10px',textAlign:'right'}}>
         {ud&&(ud.prod>0||ud.dig>0)?(
           <><div style={{fontSize:12,fontWeight:600,color:'#7c3aed'}}>{brl(ud.prod)}</div><div style={{fontSize:10,color:'#94a3b8'}}>{brl(ud.dig)} dig.</div></>
@@ -286,16 +288,16 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[]
   const mesesHeader=(()=>{
     const md=parceiros[0]?.meses_display||[]
     const nomes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
-    if (md.length===3) {
+    if (md.length>=1) {
       return md.map(m=>{
         const [mm,yy]=m.mes.split('/').map(Number)
         return `${nomes[mm]}/${String(yy).slice(2)}`
       })
     }
-    // Fallback: 3 últimos meses baseado em hoje
+    // Fallback: 4 últimos meses baseado em hoje
     const hoje=new Date()
-    return Array.from({length:3},(_,i)=>{
-      const d=new Date(hoje.getFullYear(),hoje.getMonth()-2+i,1)
+    return Array.from({length:4},(_,i)=>{
+      const d=new Date(hoje.getFullYear(),hoje.getMonth()-3+i,1)
       return `${nomes[d.getMonth()+1]}/${String(d.getFullYear()).slice(2)}`
     })
   })()
@@ -318,7 +320,7 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[]
 
   const headers=[
     ['Parceiro','left'],['Q','center'],['Média 2025 / Pico','right'],
-    [mesesHeader[0],'right'],[mesesHeader[1],'right'],[`${mesesHeader[2]} ▶`,'right'],
+    [mesesHeader[0],'right'],[mesesHeader[1],'right'],[mesesHeader[2],'right'],[`${mesesHeader[3]} ▶`,'right'],
     ['Último Dia','right'],['Gap','right'],['Projeção','right'],
     ['Status CRM','left'],['Obs','center'],['','center'],
   ]
@@ -377,10 +379,10 @@ const META_MAIO = 85000
 
 function AbaGerencial({parceiros,loading}:{parceiros:Parceiro[];loading:boolean}) {
   const meses=parceiros[0]?.meses_display||[]
-  const mesAtual=meses[2]
+  const mesAtual=meses[3]
   const totalProj=parceiros.reduce((a,p)=>a+p.proj_prod,0)
-  const totalMesAtual=mesAtual?parceiros.reduce((a,p)=>a+(p.meses_display?.[2]?.prod||p.abr_prod||0),0):parceiros.reduce((a,p)=>a+p.abr_prod,0)
-  const totalMesAnt=parceiros.reduce((a,p)=>a+(p.meses_display?.[1]?.prod||p.mar_prod||0),0)
+  const totalMesAtual=mesAtual?parceiros.reduce((a,p)=>a+(p.meses_display?.[3]?.prod||p.abr_prod||0),0):parceiros.reduce((a,p)=>a+p.abr_prod,0)
+  const totalMesAnt=parceiros.reduce((a,p)=>a+(p.meses_display?.[2]?.prod||p.mar_prod||0),0)
   const comMedia=parceiros.filter(p=>p.media_2025)
   const totalMedia=comMedia.reduce((a,p)=>a+(p.media_2025||0),0)
   const vsMedia2025=totalMedia>0?((totalProj-totalMedia)/totalMedia*100):null
