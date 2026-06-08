@@ -384,12 +384,22 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
 }
 
 // ── ABA TABELA ──────────────────────────────────────────────────────────────
-function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceiros:Parceiro[];lojaFiltro?:string;loading:boolean;onUpdate:(p:Parceiro)=>void;onAbrirFicha:(p:Parceiro)=>void}) {
+function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre}:{parceiros:Parceiro[];lojaFiltro?:string;loading:boolean;onUpdate:(p:Parceiro)=>void;onAbrirFicha:(p:Parceiro)=>void;filtroPre?:{quadrante?:string;topN?:number;zerados?:boolean}}) {
   const [busca,setBusca]=useState('')
   const [fProm,setFProm]=useState('')
-  const [fQ,setFQ]=useState('')
+  const [fQ,setFQ]=useState(filtroPre?.quadrante||'')
   const [fStatus,setFStatus]=useState('')
   const [fPerfil,setFPerfil]=useState('')
+  const [fTopN,setFTopN]=useState<number|null>(filtroPre?.topN||null)
+  const [fZerados,setFZerados]=useState<boolean>(filtroPre?.zerados||false)
+
+  // Aplicar filtros pré quando o componente monta ou mudam
+  useEffect(()=>{
+    if (filtroPre?.quadrante) setFQ(filtroPre.quadrante)
+    if (filtroPre?.topN) setFTopN(filtroPre.topN)
+    if (filtroPre?.zerados) setFZerados(true)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[])
 
   // Header de meses: usar os meses reais que vêm do backend (alinhados com meses_display)
   const mesesHeader=(()=>{
@@ -409,6 +419,14 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceir
     })
   })()
 
+  // IDs do Top N (calculado sobre todos os parceiros, antes de filtros)
+  const topIds=(()=>{
+    if(!fTopN) return null
+    const prodMes=(p:any)=>p.meses_display?.[3]?.prod||0
+    const ordenados=[...parceiros].sort((a,b)=>prodMes(b)-prodMes(a)).slice(0,fTopN)
+    return new Set(ordenados.map(p=>p.id))
+  })()
+
   const filtrados=parceiros.filter(p=>{
     if (lojaFiltro) {
       if (lojaFiltro==='PEDRO') { if (!(p.loja==='PEDRO'||p.promotora==='GLM')) return false }
@@ -419,11 +437,18 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceir
     if (fQ&&p.quadrante!==fQ) return false
     if (fPerfil&&p.perfil_2025!==fPerfil) return false
     if (fStatus){if(fStatus==='sem_status'&&p.status!==null)return false;if(fStatus!=='sem_status'&&p.status!==fStatus)return false}
+    if (topIds&&!topIds.has(p.id)) return false
+    if (fZerados) {
+      const pot=(p as any).potencial||Math.max(p.pico_2025||0,...(p.meses_display||[]).map((m:any)=>m.prod||0))
+      const prodAtual=p.meses_display?.[3]?.prod||0
+      const digAtual=p.meses_display?.[3]?.dig||0
+      if (!(prodAtual===0 && digAtual===0 && pot>50000)) return false
+    }
     return true
   })
   const promotoras=[...new Set(parceiros.map(p=>p.promotora))].sort()
   const perfis=[...new Set(parceiros.map(p=>p.perfil_2025).filter(Boolean))].sort() as string[]
-  const limpo=busca||fProm||fQ||fStatus||fPerfil
+  const limpo=busca||fProm||fQ||fStatus||fPerfil||fTopN||fZerados
 
   const headers=[
     ['Parceiro','left'],['Q','center'],['Potencial / Média','right'],
@@ -455,7 +480,9 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceir
             {f.opts.map(o=><option key={o} value={o}>{o==='sem_status'?'— Sem status':STATUS_CFG[o as NonNullable<StatusCRM>]?.label||o.replace('PRODUTOR ','')}</option>)}
           </select>
         ))}
-        {limpo&&<button onClick={()=>{setBusca('');setFProm('');setFQ('');setFStatus('');setFPerfil('')}} style={{display:'flex',alignItems:'center',gap:4,padding:'8px 10px',borderRadius:8,border:'0.5px solid #fca5a5',background:'#fee2e2',color:'#7f1d1d',cursor:'pointer',fontSize:12}}><X style={{width:12,height:12}}/> Limpar</button>}
+        {fTopN&&<span style={{display:'flex',alignItems:'center',gap:5,padding:'7px 11px',borderRadius:8,background:'#dbeafe',color:'#1e3a5f',border:'0.5px solid #93c5fd',fontSize:11,fontWeight:600}}>Top {fTopN} <button onClick={()=>setFTopN(null)} style={{border:'none',background:'transparent',color:'#1e3a5f',cursor:'pointer',padding:0,display:'flex'}}><X style={{width:11,height:11}}/></button></span>}
+        {fZerados&&<span style={{display:'flex',alignItems:'center',gap:5,padding:'7px 11px',borderRadius:8,background:'#fef3c7',color:'#78350f',border:'0.5px solid #fcd34d',fontSize:11,fontWeight:600}}>Zerados c/ potencial {'>'}R$50k <button onClick={()=>setFZerados(false)} style={{border:'none',background:'transparent',color:'#78350f',cursor:'pointer',padding:0,display:'flex'}}><X style={{width:11,height:11}}/></button></span>}
+        {limpo&&<button onClick={()=>{setBusca('');setFProm('');setFQ('');setFStatus('');setFPerfil('');setFTopN(null);setFZerados(false)}} style={{display:'flex',alignItems:'center',gap:4,padding:'8px 10px',borderRadius:8,border:'0.5px solid #fca5a5',background:'#fee2e2',color:'#7f1d1d',cursor:'pointer',fontSize:12}}><X style={{width:12,height:12}}/> Limpar</button>}
         <span style={{fontSize:12,color:'#94a3b8',marginLeft:'auto'}}>{filtrados.length} parceiros</span>
       </div>
       <div style={{background:'#fff',borderRadius:10,border:'0.5px solid #e8ecf0',overflow:'hidden'}}>
@@ -481,7 +508,7 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceir
 }
 
 // ── ABA GERENCIAL — DASHBOARD DE GESTÃO ──────────────────────────────────────
-function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loading:boolean;onAbrirFicha:(p:Parceiro)=>void}) {
+function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parceiro[];loading:boolean;onAbrirFicha:(p:Parceiro)=>void;onNavegar:(tab:Tab,filtros?:{quadrante?:string;topN?:number;zerados?:boolean})=>void}) {
   if(loading) return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Carregando...</div>
   if(!parceiros.length) return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Sem parceiros carregados. Faça um upload na aba Upload.</div>
 
@@ -649,11 +676,14 @@ function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loa
           const d=dadosGestor(g.key)
           const ritmoG=d.prodAtual>0?((d.prodAtual/(proRataEsperado*d.gp.length/parceiros.length))-1)*100:0
           return (
-            <div key={g.key} style={{background:'#fff',borderRadius:12,padding:'14px 16px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+            <div key={g.key} onClick={()=>onNavegar(g.key as Tab)}
+              style={{background:'#fff',borderRadius:12,padding:'14px 16px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)',cursor:'pointer',transition:'all 0.15s'}}
+              onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.borderColor='#93c5fd';(e.currentTarget as HTMLDivElement).style.transform='translateY(-1px)';(e.currentTarget as HTMLDivElement).style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.borderColor='#e8ecf0';(e.currentTarget as HTMLDivElement).style.transform='translateY(0)';(e.currentTarget as HTMLDivElement).style.boxShadow='0 1px 4px rgba(0,0,0,0.05)'}}>
               <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
                 <div style={{width:34,height:34,borderRadius:'50%',background:g.bg,color:g.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{g.initials}</div>
                 <div style={{flex:1}}>
-                  <div style={{fontSize:14,fontWeight:700,color:'#0f172a'}}>{g.label}</div>
+                  <div style={{fontSize:14,fontWeight:700,color:'#0f172a',display:'flex',alignItems:'center',gap:5}}>{g.label} <ChevronRight style={{width:11,height:11,color:'#94a3b8'}}/></div>
                   <div style={{fontSize:10,color:'#94a3b8'}}>{d.total} parceiros · {d.ativos} ativos</div>
                 </div>
                 {d.tendencia!==null&&(
@@ -673,8 +703,14 @@ function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loa
                   <span style={{fontSize:12,fontWeight:600,color:'#0369a1'}}>{brl(d.proj)}</span>
                 </div>
                 {d.zerados>0&&(
-                  <div style={{marginTop:4,padding:'7px 10px',background:'#fef3c7',borderRadius:8,border:'0.5px solid #fcd34d'}}>
-                    <div style={{fontSize:11,fontWeight:700,color:'#7c2d12'}}>⚠ {d.zerados} parceiro{d.zerados>1?'s':''} zerado{d.zerados>1?'s':''}</div>
+                  <div onClick={e=>{e.stopPropagation();onNavegar(g.key as Tab,{zerados:true})}}
+                    style={{marginTop:4,padding:'7px 10px',background:'#fef3c7',borderRadius:8,border:'0.5px solid #fcd34d',cursor:'pointer',transition:'background 0.15s'}}
+                    onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.background='#fde68a'}}
+                    onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.background='#fef3c7'}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#7c2d12',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                      <span>⚠ {d.zerados} parceiro{d.zerados>1?'s':''} zerado{d.zerados>1?'s':''}</span>
+                      <ChevronRight style={{width:11,height:11}}/>
+                    </div>
                     <div style={{fontSize:10,color:'#92400e'}}>Com potencial &gt;R$50k sem produção</div>
                   </div>
                 )}
@@ -699,8 +735,14 @@ function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loa
             {label:'Top 10',pct:pct10,val:top10,n:10},
             {label:'Top 20',pct:pct20,val:top20,n:20},
           ].map(t=>(
-            <div key={t.label} style={{background:'#f8fafc',borderRadius:8,padding:'10px 12px',border:'0.5px solid #f1f5f9'}}>
-              <div style={{fontSize:10,color:'#94a3b8',fontWeight:600,marginBottom:3}}>{t.label} = {t.pct.toFixed(0)}% do total</div>
+            <div key={t.label} onClick={()=>onNavegar('todos',{topN:t.n})}
+              style={{background:'#f8fafc',borderRadius:8,padding:'10px 12px',border:'0.5px solid #f1f5f9',cursor:'pointer',transition:'all 0.15s'}}
+              onMouseEnter={e=>{(e.currentTarget as HTMLDivElement).style.background='#eff6ff';(e.currentTarget as HTMLDivElement).style.borderColor='#93c5fd'}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.background='#f8fafc';(e.currentTarget as HTMLDivElement).style.borderColor='#f1f5f9'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                <div style={{fontSize:10,color:'#94a3b8',fontWeight:600}}>{t.label} = {t.pct.toFixed(0)}% do total</div>
+                <ChevronRight style={{width:11,height:11,color:'#94a3b8'}}/>
+              </div>
               <div style={{fontSize:14,fontWeight:700,color:'#0f172a'}}>{brl(t.val)}</div>
               <div style={{marginTop:6,height:6,background:'#e2e8f0',borderRadius:3,overflow:'hidden'}}>
                 <div style={{height:6,width:`${Math.min(t.pct,100)}%`,background:t.pct>=60?'#dc2626':t.pct>=40?'#b45309':'#15803d'}}/>
@@ -718,8 +760,14 @@ function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loa
         <div style={{fontSize:12,fontWeight:700,color:'#0f172a',marginBottom:10}}>Quadrantes — distribuição da carteira</div>
         <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>
           {quadrantes.map(q=>(
-            <div key={q.q} style={{background:q.info.bg,borderRadius:8,padding:'10px 11px',border:`0.5px solid ${q.info.border}`}}>
-              <div style={{fontSize:10,fontWeight:700,color:q.info.color,marginBottom:3}}>{q.q} · {q.info.label}</div>
+            <div key={q.q} onClick={()=>q.count>0&&onNavegar('todos',{quadrante:q.q})}
+              style={{background:q.info.bg,borderRadius:8,padding:'10px 11px',border:`0.5px solid ${q.info.border}`,cursor:q.count>0?'pointer':'default',opacity:q.count>0?1:0.6,transition:'all 0.15s'}}
+              onMouseEnter={e=>{if(q.count>0){(e.currentTarget as HTMLDivElement).style.transform='translateY(-1px)';(e.currentTarget as HTMLDivElement).style.boxShadow='0 4px 12px rgba(0,0,0,0.08)'}}}
+              onMouseLeave={e=>{(e.currentTarget as HTMLDivElement).style.transform='translateY(0)';(e.currentTarget as HTMLDivElement).style.boxShadow='none'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:3}}>
+                <div style={{fontSize:10,fontWeight:700,color:q.info.color}}>{q.q} · {q.info.label}</div>
+                {q.count>0&&<ChevronRight style={{width:10,height:10,color:q.info.color,opacity:0.6}}/>}
+              </div>
               <div style={{fontSize:18,fontWeight:700,color:q.info.color,lineHeight:1}}>{q.count}</div>
               <div style={{fontSize:9,color:q.info.color,opacity:0.75,marginTop:3}}>{q.info.desc}</div>
               <div style={{fontSize:10,color:q.info.color,fontWeight:600,marginTop:5,borderTop:`0.5px solid ${q.info.border}`,paddingTop:5}}>{brl(q.potencial)}</div>
@@ -1016,9 +1064,13 @@ export default function Page() {
   const [parceiros,setParceiros]=useState<Parceiro[]>([])
   const [loading,setLoading]=useState(true)
   const [ficha,setFicha]=useState<Parceiro|null>(null)
+  const [filtroPre,setFiltroPre]=useState<{quadrante?:string;topN?:number;zerados?:boolean}>({})
   const load=useCallback(async()=>{setLoading(true);const r=await fetch('/api/parceiros');setParceiros(await r.json());setLoading(false)},[])
   useEffect(()=>{load()},[load])
   const update=(p:Parceiro)=>{setParceiros(prev=>prev.map(x=>x.id===p.id?p:x));setFicha(prev=>prev&&prev.id===p.id?p:prev)}
+  const navegarPara=(novaTab:Tab,filtros:{quadrante?:string;topN?:number;zerados?:boolean}={})=>{setFiltroPre(filtros);setTab(novaTab)}
+  // Limpar filtro pré quando trocar de aba manualmente
+  const trocarTab=(t:Tab)=>{setFiltroPre({});setTab(t)}
   return (
     <div style={{minHeight:'100vh',background:'#f0f2f5',fontFamily:'var(--font-sans,system-ui)'}}>
       <div style={{background:'#07294a',color:'#fff',padding:'0 20px',height:56,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:50,boxShadow:'0 4px 16px rgba(0,0,0,0.25)'}}>
@@ -1038,7 +1090,7 @@ export default function Page() {
           <div style={{width:1,height:28,background:'rgba(255,255,255,0.15)'}}/>
           <div style={{display:'flex',gap:2}}>
             {TABS.map(t=>(
-              <button key={t.id} onClick={()=>setTab(t.id)}
+              <button key={t.id} onClick={()=>trocarTab(t.id)}
                 style={{padding:'6px 13px',fontSize:11.5,borderRadius:6,border:'none',cursor:'pointer',fontWeight:tab===t.id?600:400,background:tab===t.id?'rgba(255,255,255,0.18)':'transparent',color:tab===t.id?'#fff':'rgba(255,255,255,0.6)',transition:'all 0.15s'}}>
                 {t.label}
               </button>
@@ -1053,11 +1105,11 @@ export default function Page() {
         </div>
       </div>
       <div style={{maxWidth:1600,margin:'0 auto',padding:'16px 20px'}}>
-        {tab==='gerencial' && <AbaGerencial parceiros={parceiros} loading={loading} onAbrirFicha={setFicha}/>}
-        {tab==='todos'     && <AbaTabela parceiros={parceiros} loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
-        {tab==='VALERIA'   && <AbaTabela parceiros={parceiros} lojaFiltro="VALERIA" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
-        {tab==='PEDRO'     && <AbaTabela parceiros={parceiros} lojaFiltro="PEDRO" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
-        {tab==='ERALDO'    && <AbaTabela parceiros={parceiros} lojaFiltro="ERALDO" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
+        {tab==='gerencial' && <AbaGerencial parceiros={parceiros} loading={loading} onAbrirFicha={setFicha} onNavegar={navegarPara}/>}
+        {tab==='todos'     && <AbaTabela parceiros={parceiros} loading={loading} onUpdate={update} onAbrirFicha={setFicha} filtroPre={filtroPre}/>}
+        {tab==='VALERIA'   && <AbaTabela parceiros={parceiros} lojaFiltro="VALERIA" loading={loading} onUpdate={update} onAbrirFicha={setFicha} filtroPre={filtroPre}/>}
+        {tab==='PEDRO'     && <AbaTabela parceiros={parceiros} lojaFiltro="PEDRO" loading={loading} onUpdate={update} onAbrirFicha={setFicha} filtroPre={filtroPre}/>}
+        {tab==='ERALDO'    && <AbaTabela parceiros={parceiros} lojaFiltro="ERALDO" loading={loading} onUpdate={update} onAbrirFicha={setFicha} filtroPre={filtroPre}/>}
         {tab==='upload'    && <AbaUpload onDadosAtualizados={load}/>}
         <div style={{marginTop:10,fontSize:11,color:'#94a3b8',textAlign:'center'}}>Melhor Crédito · CRM · {new Date().getFullYear()}</div>
       </div>
