@@ -26,21 +26,21 @@ export async function GET(req: NextRequest) {
     return (ya*100+ma)-(yb*100+mb)
   })
 
-  // Pegar o MAIOR mês cronológico e voltar 3 meses a partir dele
+  // Pegar o MAIOR mês cronológico e voltar 4 meses a partir dele
   const maiorSlot = slotsOrdenados[slotsOrdenados.length-1]
-  let ultimos3: string[] = []
+  let ultimos4: string[] = []
   if (maiorSlot) {
     const [m,y] = maiorSlot.split('/').map(Number)
-    for (let i = 2; i >= 0; i--) {
+    for (let i = 3; i >= 0; i--) {
       let nm = m - i, ny = y
       while (nm <= 0) { nm += 12; ny -= 1 }
-      ultimos3.push(`${String(nm).padStart(2,'0')}/${ny}`)
+      ultimos4.push(`${String(nm).padStart(2,'0')}/${ny}`)
     }
   }
 
   return NextResponse.json(parceiros.map(p => ({
     ...p,
-    meses_display: ultimos3.map(slot => ({ mes:slot, prod:p.historico_mensal?.[slot]?.prod||0, dig:p.historico_mensal?.[slot]?.dig||0 })),
+    meses_display: ultimos4.map(slot => ({ mes:slot, prod:p.historico_mensal?.[slot]?.prod||0, dig:p.historico_mensal?.[slot]?.dig||0 })),
     ultimo_dia: p.ultimo_dia||null,
   })))
 }
