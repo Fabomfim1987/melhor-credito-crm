@@ -111,6 +111,10 @@ export async function PATCH(req: NextRequest) {
     if (!mesRef || !/^\d{2}\/\d{4}$/.test(mesRef)) {
       return NextResponse.json({ error: 'mes_ref inválido ou ausente', recebido: mesRef }, { status: 400 })
     }
+    // Data de hoje no formato ISO (YYYY-MM-DD) — usado para snapshot diário
+    const hojeISO = new Date().toISOString().slice(0,10)
+    const hojeMesRef = `${String(new Date().getMonth()+1).padStart(2,'0')}/${new Date().getFullYear()}`
+
     for (const p of body.parceiros_bulk) {
       const key = `parceiro:${p.id}`
       const existing = await redis.get(key)
@@ -119,12 +123,24 @@ export async function PATCH(req: NextRequest) {
       // Limpar qualquer slot inválido herdado (undefined, null, etc.)
       Object.keys(historico).forEach(k => { if (!/^\d{2}\/\d{4}$/.test(k)) delete historico[k] })
       historico[mesRef] = { prod: p.abr_prod||0, dig: p.abr_dig||0 }
+
+      // Snapshot diário — só guardar se o upload é do mês corrente
+      // Limpar entradas que não sejam do mês corrente (rolling: só mês atual)
+      let historicoDiario = prev.historico_diario || {}
+      Object.keys(historicoDiario).forEach(d => {
+        if (!d.startsWith(hojeISO.slice(0,7))) delete historicoDiario[d]
+      })
+      if (mesRef === hojeMesRef) {
+        historicoDiario[hojeISO] = { prod: p.abr_prod||0, dig: p.abr_dig||0 }
+      }
+
       await redis.set(key, JSON.stringify({
         ...p,
         status: prev.status ?? null,
         observacoes: prev.observacoes ?? [],
         ultima_atualizacao: prev.ultima_atualizacao ?? null,
         historico_mensal: historico,
+        historico_diario: historicoDiario,
       }))
     }
     return NextResponse.json({ ok: true, count: body.parceiros_bulk.length, mes: mesRef })
