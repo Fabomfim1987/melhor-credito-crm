@@ -384,8 +384,7 @@ function Linha({p,onFicha,onStatus}:{p:Parceiro;onFicha:()=>void;onStatus:(id:st
 }
 
 // ── ABA TABELA ──────────────────────────────────────────────────────────────
-function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[];lojaFiltro?:string;loading:boolean;onUpdate:(p:Parceiro)=>void}) {
-  const [ficha,setFicha]=useState<Parceiro|null>(null)
+function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha}:{parceiros:Parceiro[];lojaFiltro?:string;loading:boolean;onUpdate:(p:Parceiro)=>void;onAbrirFicha:(p:Parceiro)=>void}) {
   const [busca,setBusca]=useState('')
   const [fProm,setFProm]=useState('')
   const [fQ,setFQ]=useState('')
@@ -472,215 +471,268 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate}:{parceiros:Parceiro[]
             <tbody>
               {loading?<tr><td colSpan={12} style={{padding:'48px',textAlign:'center',color:'#94a3b8'}}>Carregando...</td></tr>
               :filtrados.length===0?<tr><td colSpan={12} style={{padding:'48px',textAlign:'center',color:'#94a3b8'}}>Nenhum parceiro encontrado.</td></tr>
-              :filtrados.map(p=><Linha key={p.id} p={p} onFicha={()=>setFicha(p)} onStatus={(id,s)=>{onUpdate({...p,status:s})}}/>)}
+              :filtrados.map(p=><Linha key={p.id} p={p} onFicha={()=>onAbrirFicha(p)} onStatus={(id,s)=>{onUpdate({...p,status:s})}}/>)}
             </tbody>
           </table>
         </div>
       </div>
-      {ficha&&<Ficha p={ficha} onClose={()=>setFicha(null)} onUpdate={p=>{onUpdate(p);setFicha(p)}}/>}
     </div>
   )
 }
 
-// ── ABA GERENCIAL ────────────────────────────────────────────────────────────
-const META_MAIO = 85000
-
-function AbaGerencial({parceiros,loading}:{parceiros:Parceiro[];loading:boolean}) {
-  const meses=parceiros[0]?.meses_display||[]
-  const mesAtual=meses[3]
-  const totalProj=parceiros.reduce((a,p)=>a+p.proj_prod,0)
-  const totalMesAtual=mesAtual?parceiros.reduce((a,p)=>a+(p.meses_display?.[3]?.prod||p.abr_prod||0),0):parceiros.reduce((a,p)=>a+p.abr_prod,0)
-  const totalMesAnt=parceiros.reduce((a,p)=>a+(p.meses_display?.[2]?.prod||p.mar_prod||0),0)
-  const comMedia=parceiros.filter(p=>p.media_2025)
-  const totalMedia=comMedia.reduce((a,p)=>a+(p.media_2025||0),0)
-  const vsMedia2025=totalMedia>0?((totalProj-totalMedia)/totalMedia*100):null
-  const semStatus=parceiros.filter(p=>!p.status&&['Q1','Q2'].includes(p.quadrante)).length
-  const emNeg=parceiros.filter(p=>p.status==='em_negociacao').length
-  const pctMeta=Math.min(totalProj/META_MAIO*100,100)
-  const corMeta=totalProj>=META_MAIO?'#15803d':totalProj>=META_MAIO*0.8?'#b45309':'#dc2626'
-
-  const negParadas=parceiros.filter(p=>{
-    if(p.status!=='em_negociacao')return false
-    const obs=p.observacoes||[]
-    if(!obs.length)return true
-    return(Date.now()-new Date(obs[0].data).getTime())>5*86400000
-  })
-
-  const alertasVermelhos:{id:string;msg:string;sub:string}[]=[]
-  const alertasAmarelos:{id:string;msg:string;sub:string}[]=[]
-
-  negParadas.forEach(p=>alertasVermelhos.push({id:p.id,msg:`${p.nome} — Em Negociação parada há +5 dias`,sub:`${p.promotora}/${p.loja} · gap ${p.gap_prod>=0?'+':''}${brl(p.gap_prod)}`}))
-  const q1SemStatus=parceiros.filter(p=>p.quadrante==='Q1'&&!p.status)
-  if(q1SemStatus.length>0) alertasVermelhos.push({id:'q1',msg:`${q1SemStatus.length} parceiro${q1SemStatus.length>1?'s':''} Q1 sem tabulação`,sub:q1SemStatus.slice(0,3).map(p=>p.nome.split(' ')[0]).join(', ')+(q1SemStatus.length>3?'...':'')})
-  const q2SemStatus=parceiros.filter(p=>p.quadrante==='Q2'&&!p.status)
-  if(q2SemStatus.length>0) alertasAmarelos.push({id:'q2',msg:`${q2SemStatus.length} parceiro${q2SemStatus.length>1?'s':''} Q2 sem tabulação`,sub:q2SemStatus.slice(0,3).map(p=>p.nome.split(' ')[0]).join(', ')+(q2SemStatus.length>3?'...':'')})
-  if(totalProj<META_MAIO*0.9) alertasAmarelos.push({id:'meta',msg:`Projeção ${pct(((totalProj-META_MAIO)/META_MAIO)*100)} da meta`,sub:`Faltam ${brl(META_MAIO-totalProj)} para atingir R$ ${(META_MAIO/1000).toFixed(0)}k`})
-
-  const GESTORES=[
-    {key:'VALERIA',label:'Valeria',initials:'VA',bg:'#dbeafe',color:'#0c447c'},
-    {key:'PEDRO',  label:'Pedro',  initials:'PE',bg:'#fef3c7',color:'#78350f'},
-    {key:'ERALDO', label:'Eraldo', initials:'ER',bg:'#dcfce7',color:'#14532d'},
-  ]
-  const statusCounts=(ps:Parceiro[])=>{
-    const c:Record<string,number>={ativo:0,parou:0,migrou:0,venda_fraca:0,em_negociacao:0,lista_transmissao:0,sem_status:0}
-    ps.forEach(p=>p.status?c[p.status]++:c.sem_status++); return c
-  }
-  const ultimaObs=(ps:Parceiro[])=>{
-    const datas=ps.flatMap(p=>p.observacoes?.map(o=>o.data)||[])
-    if(!datas.length)return null
-    return new Date(Math.max(...datas.map(d=>new Date(d).getTime())))
-  }
-  const badge=(label:string,n:number,bg:string,color:string,border:string)=>(
-    <span style={{fontSize:9,fontWeight:500,padding:'2px 6px',borderRadius:10,background:bg,color,border:`0.5px solid ${border}`,whiteSpace:'nowrap'}}>{n} {label}</span>
-  )
-  if(loading)return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Carregando...</div>
+// ── ABA GERENCIAL — DASHBOARD DE GESTÃO ──────────────────────────────────────
+function AbaGerencial({parceiros,loading,onAbrirFicha}:{parceiros:Parceiro[];loading:boolean;onAbrirFicha:(p:Parceiro)=>void}) {
+  if(loading) return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Carregando...</div>
+  if(!parceiros.length) return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Sem parceiros carregados. Faça um upload na aba Upload.</div>
 
   const hoje=new Date()
   const nomes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
   const mesAtualNome=`${nomes[hoje.getMonth()+1]}/${String(hoje.getFullYear()).slice(2)}`
 
+  // Helpers
+  const meses=parceiros[0]?.meses_display||[]
+  const prodMesAtual=(p:any)=>p.meses_display?.[3]?.prod||0
+  const digMesAtual=(p:any)=>p.meses_display?.[3]?.dig||0
+  const potencialDe=(p:any)=>(p as any).potencial||Math.max(p.pico_2025||0,...(p.meses_display||[]).map((m:any)=>m.prod||0))
+  const mesAntProd=(p:any)=>p.meses_display?.[2]?.prod||0
+
+  // BLOCO 1 — Saúde do mês
+  // Pro-rata: quantos dias úteis já passaram do mês corrente
+  const duMes:Record<number,number>={1:21,2:19,3:21,4:20,5:20,6:19,7:23,8:21,9:22,10:22,11:19,12:22}
+  const duTotal=duMes[hoje.getMonth()+1]||20
+  let duDecorridos=0
+  for(let d=1;d<=hoje.getDate();d++){const dt=new Date(hoje.getFullYear(),hoje.getMonth(),d);const dow=dt.getDay();if(dow!==0&&dow!==6)duDecorridos++}
+  duDecorridos=Math.max(duDecorridos,1)
+
+  const totalProdMes=parceiros.reduce((a,p)=>a+prodMesAtual(p),0)
+  const totalProj=parceiros.reduce((a,p)=>a+p.proj_prod,0)
+  const totalMeta=parceiros.reduce((a,p)=>a+potencialDe(p),0)
+  const proRataEsperado=totalMeta*(duDecorridos/duTotal)
+  const ritmoPct=proRataEsperado>0?((totalProdMes-proRataEsperado)/proRataEsperado*100):0
+  const pctMeta=totalMeta>0?(totalProj/totalMeta*100):0
+
+  // BLOCO 2 — Ação necessária (Top 15 por impacto)
+  // Impacto = potencial × (1 - realização). Quem tem grande potencial e está entregando pouco = alto impacto
+  const ranking=parceiros
+    .filter(p=>potencialDe(p)>0)
+    .map(p=>{
+      const pot=potencialDe(p)
+      const atual=prodMesAtual(p)
+      const realizacao=pot>0?atual/pot:1
+      const impacto=pot*(1-Math.min(realizacao,1))
+      let motivo=''
+      if(atual===0&&pot>100000) motivo='Zerado · potencial grande'
+      else if(atual<pot*0.3) motivo=`Realizando ${(realizacao*100).toFixed(0)}% do pico`
+      else if(mesAntProd(p)>0&&atual<mesAntProd(p)*0.5) motivo=`Caiu ${Math.round((1-atual/mesAntProd(p))*100)}% vs mês ant.`
+      else motivo='—'
+      return {p,impacto,motivo,pot,atual}
+    })
+    .sort((a,b)=>b.impacto-a.impacto)
+    .slice(0,15)
+
+  // BLOCO 3 — Resumo por gestor
+  const GESTORES=[
+    {key:'VALERIA',label:'Valéria',initials:'VA',bg:'#dbeafe',color:'#0c447c'},
+    {key:'PEDRO',  label:'Pedro',  initials:'PE',bg:'#fef3c7',color:'#78350f'},
+    {key:'ERALDO', label:'Eraldo', initials:'ER',bg:'#dcfce7',color:'#14532d'},
+  ]
+  const dadosGestor=(key:string)=>{
+    const gp=key==='PEDRO'?parceiros.filter(p=>p.loja==='PEDRO'||p.promotora==='GLM'):parceiros.filter(p=>p.loja===key)
+    const prodAtual=gp.reduce((a,p)=>a+prodMesAtual(p),0)
+    const proj=gp.reduce((a,p)=>a+p.proj_prod,0)
+    const ativos=gp.filter(p=>prodMesAtual(p)>0||digMesAtual(p)>0).length
+    const zerados=gp.filter(p=>prodMesAtual(p)===0&&digMesAtual(p)===0&&potencialDe(p)>50000).length
+    const mesAnt=gp.reduce((a,p)=>a+mesAntProd(p),0)
+    const tendencia=mesAnt>0?((proj-mesAnt)/mesAnt*100):null
+    return {gp,prodAtual,proj,ativos,zerados,tendencia,total:gp.length}
+  }
+
+  // BLOCO 4 — Concentração
+  const ordenados=[...parceiros].sort((a,b)=>prodMesAtual(b)-prodMesAtual(a))
+  const top5=ordenados.slice(0,5).reduce((a,p)=>a+prodMesAtual(p),0)
+  const top10=ordenados.slice(0,10).reduce((a,p)=>a+prodMesAtual(p),0)
+  const top20=ordenados.slice(0,20).reduce((a,p)=>a+prodMesAtual(p),0)
+  const pct5=totalProdMes>0?top5/totalProdMes*100:0
+  const pct10=totalProdMes>0?top10/totalProdMes*100:0
+  const pct20=totalProdMes>0?top20/totalProdMes*100:0
+  const corConc=pct5>=60?'#dc2626':pct5>=40?'#b45309':'#15803d'
+
+  // BLOCO 5 — Quadrantes
+  const Q_INFO:Record<string,{label:string;desc:string;color:string;bg:string;border:string}>={
+    Q1:{label:'Alerta Máximo',desc:'Dig E prod zeraram',color:'#7f1d1d',bg:'#fee2e2',border:'#fca5a5'},
+    Q2:{label:'Alerta',desc:'Ambas caíram',color:'#78350f',bg:'#fef3c7',border:'#fcd34d'},
+    Q3:{label:'Dig OK / Prod Baixa',desc:'Pipeline ok, sem converter',color:'#134e4a',bg:'#ccfbf1',border:'#5eead4'},
+    Q4:{label:'Conversão Residual',desc:'Dig caiu, prod do estoque',color:'#1e3a5f',bg:'#dbeafe',border:'#93c5fd'},
+    Q5:{label:'Saudável',desc:'Crescendo ou estável',color:'#14532d',bg:'#dcfce7',border:'#86efac'},
+    Q6:{label:'Sem Movimento',desc:'Sem dig, sem prod',color:'#374151',bg:'#f3f4f6',border:'#d1d5db'},
+  }
+  const quadrantes=['Q1','Q2','Q3','Q4','Q5','Q6'].map(q=>{
+    const ps=parceiros.filter(p=>p.quadrante===q)
+    const potencialRisco=ps.reduce((a,p)=>a+potencialDe(p),0)
+    return {q,info:Q_INFO[q],count:ps.length,potencial:potencialRisco}
+  })
+
   return (
-    <div style={{display:'flex',flexDirection:'column',gap:12}}>
-      <div style={{background:'#fff',borderRadius:12,padding:'14px 18px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-end',marginBottom:8}}>
+    <div style={{display:'flex',flexDirection:'column',gap:14}}>
+
+      {/* BLOCO 1 — SAÚDE DO MÊS */}
+      <div style={{background:'#fff',borderRadius:12,padding:'16px 20px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
           <div>
-            <div style={{fontSize:9,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',fontWeight:600,marginBottom:3}}>Meta {mesAtualNome.toUpperCase()} 2026</div>
-            <div style={{display:'flex',alignItems:'baseline',gap:8}}>
-              <span style={{fontSize:22,fontWeight:700,color:corMeta,letterSpacing:'-0.5px'}}>{brl(totalProj)}</span>
-              <span style={{fontSize:13,color:'#94a3b8'}}>de {brl(META_MAIO)}</span>
-              <span style={{fontSize:12,fontWeight:700,color:corMeta}}>({pctMeta.toFixed(0)}%)</span>
-            </div>
+            <div style={{fontSize:10,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',fontWeight:600,marginBottom:3}}>Saúde {mesAtualNome.toUpperCase()} 2026</div>
+            <div style={{fontSize:11,color:'#64748b'}}>Dia útil {duDecorridos} de {duTotal} · {((duDecorridos/duTotal)*100).toFixed(0)}% do mês decorrido</div>
           </div>
           <div style={{textAlign:'right'}}>
-            <div style={{fontSize:10,color:'#64748b'}}>Faltam</div>
-            <div style={{fontSize:16,fontWeight:700,color:totalProj>=META_MAIO?'#15803d':'#dc2626'}}>{totalProj>=META_MAIO?'✓ Meta atingida':brl(META_MAIO-totalProj)}</div>
+            <div style={{fontSize:9,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',fontWeight:600}}>Meta (soma do potencial)</div>
+            <div style={{fontSize:16,fontWeight:700,color:'#0f172a'}}>{brl(totalMeta)}</div>
           </div>
         </div>
-        <div style={{height:10,background:'#f1f5f9',borderRadius:5,overflow:'hidden'}}>
-          <div style={{height:10,borderRadius:5,width:`${pctMeta}%`,background:corMeta,transition:'width 0.5s'}}/>
-        </div>
-      </div>
-
-      <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10}}>
-        {[
-          {label:'Média 2025',val:brl(comMedia.length>0?totalMedia/comMedia.length:0),sub:`${comMedia.length} com histórico`,color:'#4f46e5',bg:'#ede9fe',icon:<TrendingUp style={{width:15,height:15}}/>},
-          {label:'Mês anterior',val:brl(totalMesAnt),sub:'Fechado',color:'#07294a',bg:'#dbeafe',icon:<Users style={{width:15,height:15}}/>},
-          {label:'Mês atual acum.',val:brl(totalMesAtual),sub:'Acumulado no período',color:'#0369a1',bg:'#e0f2fe',icon:<TrendingUp style={{width:15,height:15}}/>},
-          {label:'Projeção',val:brl(totalProj),sub:vsMedia2025!==null?`${pct(vsMedia2025)} vs média 2025`:pct(totalMesAnt>0?(totalProj-totalMesAnt)/totalMesAnt*100:null),color:totalProj>=totalMesAnt?'#15803d':'#dc2626',bg:totalProj>=totalMesAnt?'#dcfce7':'#fee2e2',icon:<ArrowUpRight style={{width:15,height:15}}/>},
-          {label:'Ação Necessária',val:String(semStatus),sub:`${emNeg} em negociação`,color:'#b45309',bg:'#fef3c7',icon:<AlertTriangle style={{width:15,height:15}}/>},
-        ].map(k=>(
-          <div key={k.label} style={{background:'#fff',borderRadius:12,padding:'14px 16px',border:'0.5px solid #e8ecf0',display:'flex',gap:12,alignItems:'flex-start',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-            <div style={{width:38,height:38,borderRadius:10,flexShrink:0,background:k.bg,color:k.color,display:'flex',alignItems:'center',justifyContent:'center'}}>{k.icon}</div>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:9,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:3,fontWeight:600}}>{k.label}</div>
-              <div style={{fontSize:20,fontWeight:700,color:k.label==='Projeção'||k.label==='Ação Necessária'?k.color:'#0f172a',lineHeight:1,letterSpacing:'-0.5px'}}>{k.val}</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:12}}>
+          {[
+            {label:`Realizado ${mesAtualNome}`,val:brl(totalProdMes),sub:`${parceiros.filter(p=>prodMesAtual(p)>0).length} parceiros produzindo`,color:'#0f172a'},
+            {label:`Pro-rata esperado D${duDecorridos}`,val:brl(proRataEsperado),sub:`${duDecorridos}/${duTotal} dias úteis`,color:'#64748b'},
+            {label:'Ritmo',val:`${ritmoPct>=0?'▲ +':'▼ '}${ritmoPct.toFixed(0)}%`,sub:ritmoPct>=0?'acima do esperado':'abaixo do esperado',color:ritmoPct>=0?'#15803d':'#dc2626'},
+            {label:'Projeção fechamento',val:brl(totalProj),sub:`${pctMeta.toFixed(0)}% da meta`,color:pctMeta>=80?'#15803d':pctMeta>=50?'#b45309':'#dc2626'},
+          ].map(k=>(
+            <div key={k.label}>
+              <div style={{fontSize:9,color:'#94a3b8',textTransform:'uppercase',letterSpacing:'0.06em',fontWeight:600,marginBottom:4}}>{k.label}</div>
+              <div style={{fontSize:20,fontWeight:700,color:k.color,letterSpacing:'-0.5px',lineHeight:1.1}}>{k.val}</div>
               <div style={{fontSize:10,color:'#64748b',marginTop:3}}>{k.sub}</div>
             </div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
 
-      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:10}}>
+      {/* BLOCO 2 — AÇÃO NECESSÁRIA (Top 15) */}
+      <div style={{background:'#fff',borderRadius:12,border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)',overflow:'hidden'}}>
+        <div style={{padding:'12px 18px',borderBottom:'0.5px solid #f1f5f9',display:'flex',alignItems:'center',gap:8,background:'#fff7ed'}}>
+          <AlertTriangle style={{width:14,height:14,color:'#c2410c'}}/>
+          <div style={{fontSize:12,fontWeight:700,color:'#7c2d12'}}>Ação necessária — Top 15 por impacto</div>
+          <span style={{fontSize:10,color:'#9a3412',marginLeft:'auto'}}>Ordenado por potencial × queda</span>
+        </div>
+        <table style={{width:'100%',fontSize:11,borderCollapse:'collapse'}}>
+          <thead style={{background:'#fafbfc'}}>
+            <tr>
+              <th style={{textAlign:'left',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>#</th>
+              <th style={{textAlign:'left',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>Parceiro</th>
+              <th style={{textAlign:'right',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>Potencial</th>
+              <th style={{textAlign:'right',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>{mesAtualNome}</th>
+              <th style={{textAlign:'left',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>Motivo</th>
+              <th style={{textAlign:'left',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}>Status</th>
+              <th style={{textAlign:'right',padding:'7px 14px',color:'#64748b',fontWeight:600,fontSize:9,textTransform:'uppercase'}}></th>
+            </tr>
+          </thead>
+          <tbody>
+            {ranking.map((r,i)=>(
+              <tr key={r.p.id} style={{borderTop:'0.5px solid #f1f5f9',cursor:'pointer'}} onClick={()=>onAbrirFicha(r.p)}
+                  onMouseEnter={e=>{(e.currentTarget as HTMLTableRowElement).style.background='#f8fafc'}}
+                  onMouseLeave={e=>{(e.currentTarget as HTMLTableRowElement).style.background='#fff'}}>
+                <td style={{padding:'9px 14px',color:'#94a3b8',fontWeight:600}}>{i+1}</td>
+                <td style={{padding:'9px 14px'}}>
+                  <div style={{fontSize:12,fontWeight:600,color:'#0f172a'}}>{r.p.nome}</div>
+                  <div style={{fontSize:10,color:'#94a3b8'}}>#{r.p.nr} · {r.p.promotora}/{r.p.loja}</div>
+                </td>
+                <td style={{padding:'9px 14px',textAlign:'right',fontWeight:700,color:'#0f172a'}}>{brl(r.pot)}</td>
+                <td style={{padding:'9px 14px',textAlign:'right',fontWeight:600,color:r.atual>0?'#0f172a':'#dc2626'}}>{r.atual>0?brl(r.atual):'R$ 0'}</td>
+                <td style={{padding:'9px 14px',color:'#64748b',fontSize:11}}>{r.motivo}</td>
+                <td style={{padding:'9px 14px'}}>{r.p.status?<StatusBadge status={r.p.status} tiny/>:<span style={{fontSize:10,color:'#94a3b8',fontStyle:'italic'}}>sem tab.</span>}</td>
+                <td style={{padding:'9px 14px',textAlign:'right'}}><ChevronRight style={{width:13,height:13,color:'#cbd5e1'}}/></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* BLOCO 3 — POR GESTOR */}
+      <div style={{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:12}}>
         {GESTORES.map(g=>{
-          const gp=g.key==='PEDRO'?parceiros.filter(p=>p.loja==='PEDRO'||p.promotora==='GLM'):parceiros.filter(p=>p.loja===g.key)
-          const gpNova=parceiros.filter(p=>p.loja===g.key)
-          const proj=gp.reduce((a,p)=>a+p.proj_prod,0)
-          const gap=gpNova.reduce((a,p)=>a+p.gap_prod,0)
-          const mar=gpNova.reduce((a,p)=>a+(p.meses_display?.[1]?.prod||p.mar_prod||0),0)
-          const cnt=statusCounts(gpNova)
-          const tab=gpNova.filter(p=>p.status).length
-          const pctTab=gpNova.length>0?tab/gpNova.length:0
-          const alertasG=gpNova.filter(p=>['Q1','Q2'].includes(p.quadrante)&&!p.status).length
-          const ultimaDt=ultimaObs(gpNova)
-          const diffObs=ultimaDt?Math.floor((Date.now()-ultimaDt.getTime())/1000):null
-          const obsStr=!ultimaDt?'Sem registro':diffObs&&diffObs<86400?`hoje ${ultimaDt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`:ultimaDt?`${ultimaDt.toLocaleDateString('pt-BR',{day:'2-digit',month:'2-digit'})} ${ultimaDt.toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}`:''
-          const obsAtrasada=!ultimaDt||(diffObs&&diffObs>86400)
-          const tendencia=mar>0?(proj-mar)/mar*100:null
+          const d=dadosGestor(g.key)
+          const ritmoG=d.prodAtual>0?((d.prodAtual/(proRataEsperado*d.gp.length/parceiros.length))-1)*100:0
           return (
-            <div key={g.key} style={{background:'#fff',borderRadius:12,border:'0.5px solid #e8ecf0',overflow:'hidden',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-              <div style={{padding:'11px 14px 9px',borderBottom:'0.5px solid #f1f5f9',display:'flex',alignItems:'center',justifyContent:'space-between',background:obsAtrasada?'#fffbeb':'#fff'}}>
-                <div style={{display:'flex',alignItems:'center',gap:9}}>
-                  <div style={{width:32,height:32,borderRadius:'50%',background:g.bg,color:g.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{g.initials}</div>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{g.label}</div>
-                    <div style={{fontSize:9,color:obsAtrasada?'#b45309':'#94a3b8',fontWeight:obsAtrasada?600:400}}>
-                      {obsAtrasada?'⚠ ':''}ult. obs: {obsStr}
-                    </div>
+            <div key={g.key} style={{background:'#fff',borderRadius:12,padding:'14px 16px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+              <div style={{display:'flex',alignItems:'center',gap:10,marginBottom:12}}>
+                <div style={{width:34,height:34,borderRadius:'50%',background:g.bg,color:g.color,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700}}>{g.initials}</div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:14,fontWeight:700,color:'#0f172a'}}>{g.label}</div>
+                  <div style={{fontSize:10,color:'#94a3b8'}}>{d.total} parceiros · {d.ativos} ativos</div>
+                </div>
+                {d.tendencia!==null&&(
+                  <div style={{textAlign:'right'}}>
+                    <div style={{fontSize:11,fontWeight:700,color:d.tendencia>=0?'#15803d':'#dc2626'}}>{d.tendencia>=0?'↑':'↓'} {Math.abs(d.tendencia).toFixed(0)}%</div>
+                    <div style={{fontSize:9,color:'#94a3b8'}}>vs ant.</div>
                   </div>
-                </div>
-                <div style={{display:'flex',flexDirection:'column',alignItems:'flex-end',gap:3}}>
-                  {alertasG>0&&<span style={{fontSize:9,fontWeight:700,padding:'2px 7px',borderRadius:10,background:'#fee2e2',color:'#7f1d1d',border:'0.5px solid #fca5a5'}}>{alertasG} sem tab.</span>}
-                  {tendencia!==null&&<span style={{fontSize:10,fontWeight:700,color:tendencia>=0?'#15803d':'#dc2626'}}>{tendencia>=0?'↑':'↓'} {Math.abs(tendencia).toFixed(0)}% vs ant.</span>}
-                </div>
+                )}
               </div>
-              <div style={{padding:'10px 14px',display:'flex',flexDirection:'column',gap:5}}>
-                <div style={{display:'flex',justifyContent:'space-between'}}><span style={{fontSize:10,color:'#64748b'}}>Parceiros</span><span style={{fontSize:11,fontWeight:500}}>{g.key==='PEDRO'?`${parceiros.filter(p=>p.loja==='PEDRO').length} Nova + ${parceiros.filter(p=>p.promotora==='GLM').length} GLM`:gpNova.length}</span></div>
-                <div style={{display:'flex',justifyContent:'space-between'}}><span style={{fontSize:10,color:'#64748b'}}>Projeção</span><span style={{fontSize:13,fontWeight:700,color:proj>=mar?'#15803d':'#dc2626'}}>{brl(proj)}</span></div>
-                <div style={{display:'flex',justifyContent:'space-between'}}><span style={{fontSize:10,color:'#64748b'}}>Gap vs pro-rata</span><span style={{fontSize:11,fontWeight:600,color:gap>=0?'#15803d':'#dc2626'}}>{gap>=0?'+':''}{brl(gap)}</span></div>
-                <div style={{display:'flex',justifyContent:'space-between'}}><span style={{fontSize:10,color:'#64748b'}}>Tabulados</span><span style={{fontSize:11,fontWeight:500}}>{tab} / {gpNova.length}</span></div>
-                <div style={{height:5,background:'#f1f5f9',borderRadius:3,marginTop:4,overflow:'hidden'}}>
-                  <div style={{height:5,borderRadius:3,width:`${pctTab*100}%`,background:pctTab>0.6?'#15803d':pctTab>0.3?'#f59e0b':'#dc2626',transition:'width 0.4s'}}/>
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:11,color:'#64748b'}}>Produção {mesAtualNome}</span>
+                  <span style={{fontSize:13,fontWeight:700,color:'#0f172a'}}>{brl(d.prodAtual)}</span>
                 </div>
-              </div>
-              <div style={{padding:'8px 14px',borderTop:'0.5px solid #f1f5f9',display:'flex',gap:4,flexWrap:'wrap'}}>
-                {cnt.ativo>0&&badge(`ativo${cnt.ativo>1?'s':''}`,cnt.ativo,'#dcfce7','#14532d','#86efac')}
-                {cnt.em_negociacao>0&&badge('negociação',cnt.em_negociacao,'#ccfbf1','#134e4a','#5eead4')}
-                {cnt.parou>0&&badge('parou',cnt.parou,'#fee2e2','#7f1d1d','#fca5a5')}
-                {cnt.venda_fraca>0&&badge('venda fraca',cnt.venda_fraca,'#fef3c7','#78350f','#fcd34d')}
-                {cnt.lista_transmissao>0&&badge('lista',cnt.lista_transmissao,'#ede9fe','#4c1d95','#c4b5fd')}
-                {cnt.sem_status>0&&badge('sem status',cnt.sem_status,'#f3f4f6','#374151','#d1d5db')}
+                <div style={{display:'flex',justifyContent:'space-between'}}>
+                  <span style={{fontSize:11,color:'#64748b'}}>Projeção</span>
+                  <span style={{fontSize:12,fontWeight:600,color:'#0369a1'}}>{brl(d.proj)}</span>
+                </div>
+                {d.zerados>0&&(
+                  <div style={{marginTop:4,padding:'7px 10px',background:'#fef3c7',borderRadius:8,border:'0.5px solid #fcd34d'}}>
+                    <div style={{fontSize:11,fontWeight:700,color:'#7c2d12'}}>⚠ {d.zerados} parceiro{d.zerados>1?'s':''} zerado{d.zerados>1?'s':''}</div>
+                    <div style={{fontSize:10,color:'#92400e'}}>Com potencial &gt;R$50k sem produção</div>
+                  </div>
+                )}
               </div>
             </div>
           )
         })}
       </div>
 
-      {(alertasVermelhos.length>0||alertasAmarelos.length>0)&&(
-        <div style={{background:'#fff',borderRadius:12,border:'0.5px solid #e8ecf0',padding:'12px 14px',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-          <div style={{fontSize:10,fontWeight:700,color:'#374151',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:10}}>Alertas</div>
-          <div style={{display:'flex',flexDirection:'column',gap:5}}>
-            {alertasVermelhos.map(a=>(
-              <div key={a.id} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'9px 12px',borderRadius:8,background:'#fef2f2',border:'0.5px solid #fecaca'}}>
-                <div style={{width:8,height:8,borderRadius:'50%',background:'#dc2626',flexShrink:0,marginTop:3}}/>
-                <div style={{flex:1}}><div style={{fontSize:11,fontWeight:600,color:'#7f1d1d'}}>{a.msg}</div><div style={{fontSize:10,color:'#94a3b8',marginTop:1}}>{a.sub}</div></div>
-                <span style={{fontSize:9,fontWeight:700,color:'#dc2626',background:'#fee2e2',padding:'2px 7px',borderRadius:10,whiteSpace:'nowrap',flexShrink:0}}>🔴 Hoje</span>
-              </div>
-            ))}
-            {alertasAmarelos.map(a=>(
-              <div key={a.id} style={{display:'flex',alignItems:'flex-start',gap:10,padding:'9px 12px',borderRadius:8,background:'#fffbeb',border:'0.5px solid #fde68a'}}>
-                <div style={{width:8,height:8,borderRadius:'50%',background:'#f59e0b',flexShrink:0,marginTop:3}}/>
-                <div style={{flex:1}}><div style={{fontSize:11,fontWeight:600,color:'#78350f'}}>{a.msg}</div><div style={{fontSize:10,color:'#94a3b8',marginTop:1}}>{a.sub}</div></div>
-                <span style={{fontSize:9,fontWeight:700,color:'#b45309',background:'#fef3c7',padding:'2px 7px',borderRadius:10,whiteSpace:'nowrap',flexShrink:0}}>🟡 Esta semana</span>
-              </div>
-            ))}
+      {/* BLOCO 4 — CONCENTRAÇÃO DE RISCO */}
+      <div style={{background:'#fff',borderRadius:12,padding:'14px 18px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+          <div>
+            <div style={{fontSize:12,fontWeight:700,color:'#0f172a',marginBottom:2}}>Concentração de risco</div>
+            <div style={{fontSize:11,color:'#64748b'}}>Quanto da produção de {mesAtualNome} depende dos top parceiros</div>
           </div>
+          {pct5>=60&&<span style={{fontSize:10,fontWeight:700,color:'#7f1d1d',background:'#fee2e2',padding:'4px 10px',borderRadius:8,border:'0.5px solid #fca5a5'}}>⚠ Alta concentração</span>}
         </div>
-      )}
-
-      <div style={{background:'#fff',borderRadius:12,border:'0.5px solid #e8ecf0',padding:'12px 14px',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
-        <div style={{fontSize:10,fontWeight:700,color:'#374151',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:10}}>CRM — {parceiros.length} parceiros</div>
-        <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>
-          {[{key:'ativo',label:'Ativo',bg:'#dcfce7',color:'#14532d',border:'#86efac'},
-            {key:'em_negociacao',label:'Em negociação',bg:'#ccfbf1',color:'#134e4a',border:'#5eead4'},
-            {key:'parou',label:'Parou',bg:'#fee2e2',color:'#7f1d1d',border:'#fca5a5'},
-            {key:'migrou',label:'Migrou',bg:'#dbeafe',color:'#1e3a5f',border:'#93c5fd'},
-            {key:'lista_transmissao',label:'Lista transm.',bg:'#ede9fe',color:'#4c1d95',border:'#c4b5fd'},
-            {key:'sem_status',label:'Sem status',bg:'#f3f4f6',color:'#374151',border:'#d1d5db'},
-          ].map(s=>{
-            const cnt={ativo:0,parou:0,migrou:0,venda_fraca:0,em_negociacao:0,lista_transmissao:0,sem_status:0}
-            parceiros.forEach(p=>p.status?(cnt as any)[p.status]++:cnt.sem_status++)
-            const n=(cnt as any)[s.key]||0
-            return <div key={s.key} style={{borderRadius:9,padding:'10px 11px',background:s.bg,border:`0.5px solid ${s.border}`}}>
-              <div style={{fontSize:9,fontWeight:600,color:s.color,marginBottom:4}}>{s.label}</div>
-              <div style={{fontSize:22,fontWeight:700,color:s.color,lineHeight:1}}>{n}</div>
-              <div style={{fontSize:9,color:s.color,opacity:0.7,marginTop:3}}>{parceiros.length>0?(n/parceiros.length*100).toFixed(0):0}%</div>
+        <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:10,marginTop:10}}>
+          {[
+            {label:'Top 5',pct:pct5,val:top5,n:5},
+            {label:'Top 10',pct:pct10,val:top10,n:10},
+            {label:'Top 20',pct:pct20,val:top20,n:20},
+          ].map(t=>(
+            <div key={t.label} style={{background:'#f8fafc',borderRadius:8,padding:'10px 12px',border:'0.5px solid #f1f5f9'}}>
+              <div style={{fontSize:10,color:'#94a3b8',fontWeight:600,marginBottom:3}}>{t.label} = {t.pct.toFixed(0)}% do total</div>
+              <div style={{fontSize:14,fontWeight:700,color:'#0f172a'}}>{brl(t.val)}</div>
+              <div style={{marginTop:6,height:6,background:'#e2e8f0',borderRadius:3,overflow:'hidden'}}>
+                <div style={{height:6,width:`${Math.min(t.pct,100)}%`,background:t.pct>=60?'#dc2626':t.pct>=40?'#b45309':'#15803d'}}/>
+              </div>
             </div>
-          })}
+          ))}
+        </div>
+        <div style={{marginTop:10,fontSize:10,color:'#64748b'}}>
+          {parceiros.length-20} parceiros restantes = {(100-pct20).toFixed(0)}% · {brl(totalProdMes-top20)}
         </div>
       </div>
+
+      {/* BLOCO 5 — QUADRANTES */}
+      <div style={{background:'#fff',borderRadius:12,padding:'14px 18px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#0f172a',marginBottom:10}}>Quadrantes — distribuição da carteira</div>
+        <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:8}}>
+          {quadrantes.map(q=>(
+            <div key={q.q} style={{background:q.info.bg,borderRadius:8,padding:'10px 11px',border:`0.5px solid ${q.info.border}`}}>
+              <div style={{fontSize:10,fontWeight:700,color:q.info.color,marginBottom:3}}>{q.q} · {q.info.label}</div>
+              <div style={{fontSize:18,fontWeight:700,color:q.info.color,lineHeight:1}}>{q.count}</div>
+              <div style={{fontSize:9,color:q.info.color,opacity:0.75,marginTop:3}}>{q.info.desc}</div>
+              <div style={{fontSize:10,color:q.info.color,fontWeight:600,marginTop:5,borderTop:`0.5px solid ${q.info.border}`,paddingTop:5}}>{brl(q.potencial)}</div>
+              <div style={{fontSize:8,color:q.info.color,opacity:0.7}}>em potencial</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
     </div>
   )
 }
+
 
 // ── HELPERS UPLOAD ────────────────────────────────────────────────────────────
 function parseBRL(v: any): number {
@@ -963,9 +1015,10 @@ export default function Page() {
   const [tab,setTab]=useState<Tab>('gerencial')
   const [parceiros,setParceiros]=useState<Parceiro[]>([])
   const [loading,setLoading]=useState(true)
+  const [ficha,setFicha]=useState<Parceiro|null>(null)
   const load=useCallback(async()=>{setLoading(true);const r=await fetch('/api/parceiros');setParceiros(await r.json());setLoading(false)},[])
   useEffect(()=>{load()},[load])
-  const update=(p:Parceiro)=>setParceiros(prev=>prev.map(x=>x.id===p.id?p:x))
+  const update=(p:Parceiro)=>{setParceiros(prev=>prev.map(x=>x.id===p.id?p:x));setFicha(prev=>prev&&prev.id===p.id?p:prev)}
   return (
     <div style={{minHeight:'100vh',background:'#f0f2f5',fontFamily:'var(--font-sans,system-ui)'}}>
       <div style={{background:'#07294a',color:'#fff',padding:'0 20px',height:56,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:50,boxShadow:'0 4px 16px rgba(0,0,0,0.25)'}}>
@@ -1000,14 +1053,15 @@ export default function Page() {
         </div>
       </div>
       <div style={{maxWidth:1600,margin:'0 auto',padding:'16px 20px'}}>
-        {tab==='gerencial' && <AbaGerencial parceiros={parceiros} loading={loading}/>}
-        {tab==='todos'     && <AbaTabela parceiros={parceiros} loading={loading} onUpdate={update}/>}
-        {tab==='VALERIA'   && <AbaTabela parceiros={parceiros} lojaFiltro="VALERIA" loading={loading} onUpdate={update}/>}
-        {tab==='PEDRO'     && <AbaTabela parceiros={parceiros} lojaFiltro="PEDRO" loading={loading} onUpdate={update}/>}
-        {tab==='ERALDO'    && <AbaTabela parceiros={parceiros} lojaFiltro="ERALDO" loading={loading} onUpdate={update}/>}
+        {tab==='gerencial' && <AbaGerencial parceiros={parceiros} loading={loading} onAbrirFicha={setFicha}/>}
+        {tab==='todos'     && <AbaTabela parceiros={parceiros} loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
+        {tab==='VALERIA'   && <AbaTabela parceiros={parceiros} lojaFiltro="VALERIA" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
+        {tab==='PEDRO'     && <AbaTabela parceiros={parceiros} lojaFiltro="PEDRO" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
+        {tab==='ERALDO'    && <AbaTabela parceiros={parceiros} lojaFiltro="ERALDO" loading={loading} onUpdate={update} onAbrirFicha={setFicha}/>}
         {tab==='upload'    && <AbaUpload onDadosAtualizados={load}/>}
         <div style={{marginTop:10,fontSize:11,color:'#94a3b8',textAlign:'center'}}>Melhor Crédito · CRM · {new Date().getFullYear()}</div>
       </div>
+      {ficha&&<Ficha p={ficha} onClose={()=>setFicha(null)} onUpdate={p=>{update(p)}}/>}
     </div>
   )
 }
