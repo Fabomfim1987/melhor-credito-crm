@@ -909,15 +909,48 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
     const nd=arqs['nova_dig']?.data;const np=arqs['nova_prod']?.data
     if(nd&&np){
       addLog('Nova: processando...')
-      const dM:Record<number,[string,number,string]>={};const pM:Record<number,[string,number,string]>={}
+
+      // Detectar formato automaticamente pelo cabeçalho
+      // Storm (antigo): Nº | Loja | Lugar | Nome | Contratos | Produção Bruta | Lanc | Prod Líq | Valor Base (9 colunas)
+      // Bot (novo):     Nr Corretor | Nome | Loja | Valor Digitacao/Producao (R$) (4 colunas)
+      const detectarFormato=(rows:any[][]):'storm'|'bot'=>{
+        const hdr=(rows[0]||[]).map((c:any)=>String(c||'').toLowerCase())
+        // Bot tem cabeçalho com "Nr Corretor" como primeira coluna
+        if(hdr[0]?.includes('corretor')&&hdr.length<=5)return 'bot'
+        // Storm tem "Nº" como primeira coluna e mais colunas
+        return 'storm'
+      }
+      const fmtDig=detectarFormato(nd)
+      const fmtProd=detectarFormato(np)
+      addLog(`Nova formato detectado: dig=${fmtDig}, prod=${fmtProd}`)
+
+      const dM:Record<number,[string,number,string]>={}
+      const pM:Record<number,[string,number,string]>={}
+
+      // Mapear digitação
       nd.slice(1).forEach((r:any[])=>{
-        const nr=parseInt(r[0]);if(!isNaN(nr)){
-          // r[5]=Produção Bruta (digitação do mês), r[7]=Prod.Líquida, r[8]=Valor Base (acumulado)
-          const dig=parseFloat(r[5])||0
-          dM[nr]=[String(r[3]||''),dig,String(r[1]||'')]
+        const nr=parseInt(r[0]);if(isNaN(nr))return
+        if(fmtDig==='bot'){
+          // r[0]=nr, r[1]=nome, r[2]=loja, r[3]=valor
+          dM[nr]=[String(r[1]||''),parseFloat(r[3])||0,String(r[2]||'')]
+        }else{
+          // Storm: r[0]=nr, r[1]=loja, r[3]=nome, r[5]=Produção Bruta (digitação)
+          dM[nr]=[String(r[3]||''),parseFloat(r[5])||0,String(r[1]||'')]
         }
       })
-      np.slice(1).forEach((r:any[])=>{const nr=parseInt(r[0]);if(!isNaN(nr))pM[nr]=[String(r[3]||''),parseFloat(r[8])||0,String(r[1]||'')]})
+
+      // Mapear produção
+      np.slice(1).forEach((r:any[])=>{
+        const nr=parseInt(r[0]);if(isNaN(nr))return
+        if(fmtProd==='bot'){
+          // r[0]=nr, r[1]=nome, r[2]=loja, r[3]=valor
+          pM[nr]=[String(r[1]||''),parseFloat(r[3])||0,String(r[2]||'')]
+        }else{
+          // Storm: r[0]=nr, r[1]=loja, r[3]=nome, r[8]=Valor Base (produção)
+          pM[nr]=[String(r[3]||''),parseFloat(r[8])||0,String(r[1]||'')]
+        }
+      })
+
       new Set([...Object.keys(dM).map(Number),...Object.keys(pM).map(Number)]).forEach(nr=>{
         const d=dM[nr];const p=pM[nr]
         const nome=d?.[0]||p?.[0]||'';const loja=lojaKey(d?.[2]||p?.[2]||'')
