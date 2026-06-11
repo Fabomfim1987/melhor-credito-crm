@@ -5,6 +5,12 @@ import { BASE_2025 } from '../base2025'
 import { Parceiro, StatusCRM, STATUS_CFG, Q_CFG, PERFIL_CFG } from '@/types'
 
 const brl = (v: number) => v === 0 ? 'R$ 0' : new Intl.NumberFormat('pt-BR',{style:'currency',currency:'BRL',maximumFractionDigits:0}).format(v)
+const brlK = (v: number) => {
+  if (!v) return 'R$ 0'
+  if (Math.abs(v) >= 1000000) return `R$ ${(v/1000000).toFixed(1).replace('.',',')}mi`
+  if (Math.abs(v) >= 1000) return `R$ ${Math.round(v/1000)}k`
+  return brl(v)
+}
 const pct = (v: number|null) => v===null ? '—' : `${v>0?'+':''}${v.toFixed(0)}%`
 const gapClr = (v: number) => v >= 0 ? '#16a34a' : '#dc2626'
 const varClr = (v: number|null) => v===null ? '#94a3b8' : v >= 0 ? '#16a34a' : '#dc2626'
@@ -79,7 +85,7 @@ function StatusPicker({current,onChange}:{current:StatusCRM;onChange:(s:StatusCR
   )
 }
 
-// ── FICHA ──────────────────────────────────────────────────────────────────
+// ── EVOLUÇÃO DIÁRIA (na ficha do parceiro) ───────────────────────────────────
 function EvolucaoDiaria({historico}:{historico:Record<string,{prod:number;dig:number}>}) {
   const dias = Object.keys(historico).sort()
   if (dias.length < 1) {
@@ -91,7 +97,6 @@ function EvolucaoDiaria({historico}:{historico:Record<string,{prod:number;dig:nu
     )
   }
 
-  // Calcular deltas (produção/digitação do dia)
   const linhas = dias.map((d, i) => {
     const ant = i > 0 ? historico[dias[i-1]] : { prod: 0, dig: 0 }
     return {
@@ -103,12 +108,10 @@ function EvolucaoDiaria({historico}:{historico:Record<string,{prod:number;dig:nu
     }
   })
 
-  // Detectar alerta: últimos N dias com prod_dia = 0 OU dig_dia = 0
   const ultimos3 = linhas.slice(-3)
   const semProd = ultimos3.length >= 3 && ultimos3.every(l => l.prod_dia <= 0)
   const semDig = ultimos3.length >= 3 && ultimos3.every(l => l.dig_dia <= 0)
 
-  // Dados para o gráfico (SVG simples)
   const W = 460, H = 100, PAD = 8
   const maxProd = Math.max(...linhas.map(l => l.prod_dia), 1)
   const maxDig = Math.max(...linhas.map(l => l.dig_dia), 1)
@@ -186,6 +189,7 @@ function EvolucaoDiaria({historico}:{historico:Record<string,{prod:number;dig:nu
   )
 }
 
+// ── FICHA ──────────────────────────────────────────────────────────────────
 function Ficha({p,onClose,onUpdate}:{p:Parceiro;onClose:()=>void;onUpdate:(p:Parceiro)=>void}) {
   const [obs,setObs]=useState('');const [autor,setAutor]=useState('Fabricio');const [saving,setSaving]=useState(false)
   const updateStatus=async(status:StatusCRM)=>{const r=await fetch('/api/parceiros',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:p.id,status})});onUpdate(await r.json())}
@@ -393,7 +397,6 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre
   const [fTopN,setFTopN]=useState<number|null>(filtroPre?.topN||null)
   const [fZerados,setFZerados]=useState<boolean>(filtroPre?.zerados||false)
 
-  // Aplicar filtros pré quando o componente monta ou mudam
   useEffect(()=>{
     if (filtroPre?.quadrante) setFQ(filtroPre.quadrante)
     if (filtroPre?.topN) setFTopN(filtroPre.topN)
@@ -401,7 +404,6 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[])
 
-  // Header de meses: usar os meses reais que vêm do backend (alinhados com meses_display)
   const mesesHeader=(()=>{
     const md=parceiros[0]?.meses_display||[]
     const nomes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
@@ -411,7 +413,6 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre
         return `${nomes[mm]}/${String(yy).slice(2)}`
       })
     }
-    // Fallback: 4 últimos meses baseado em hoje
     const hoje=new Date()
     return Array.from({length:4},(_,i)=>{
       const d=new Date(hoje.getFullYear(),hoje.getMonth()-3+i,1)
@@ -419,7 +420,6 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre
     })
   })()
 
-  // IDs do Top N (calculado sobre todos os parceiros, antes de filtros)
   const topIds=(()=>{
     if(!fTopN) return null
     const prodMes=(p:any)=>p.meses_display?.[3]?.prod||0
@@ -507,6 +507,102 @@ function AbaTabela({parceiros,lojaFiltro,loading,onUpdate,onAbrirFicha,filtroPre
   )
 }
 
+// ── GRÁFICO DIÁRIO AGREGADO (produção + digitação por dia) ───────────────────
+function GraficoDiario({parceiros}:{parceiros:Parceiro[]}) {
+  const agregado: Record<string,{prod:number;dig:number}> = {}
+  parceiros.forEach((p:any) => {
+    const h = p.historico_diario || {}
+    Object.keys(h).forEach(dia => {
+      if (!agregado[dia]) agregado[dia] = { prod:0, dig:0 }
+      agregado[dia].prod += h[dia]?.prod || 0
+      agregado[dia].dig  += h[dia]?.dig  || 0
+    })
+  })
+
+  const dias = Object.keys(agregado).sort()
+
+  const linhas = dias.map((d, i) => {
+    const ant = i > 0 ? agregado[dias[i-1]] : { prod:0, dig:0 }
+    return {
+      dia: d,
+      prodDia: i>0 ? Math.max(0, agregado[d].prod - ant.prod) : 0,
+      digDia:  i>0 ? Math.max(0, agregado[d].dig  - ant.dig ) : 0,
+      ehBase: i === 0,
+    }
+  }).filter(l => !l.ehBase)
+
+  const fmtDiaLabel = (iso:string) => { const [,m,d] = iso.split('-'); return `${d}/${m}` }
+
+  if (linhas.length < 1) {
+    return (
+      <div style={{borderTop:'0.5px solid #f1f5f9',paddingTop:14,marginTop:14}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#0f172a',marginBottom:4}}>Bater de olho diário — produção e digitação por dia</div>
+        <div style={{fontSize:11,color:'#94a3b8',fontStyle:'italic'}}>
+          Ainda sem movimento diário suficiente. Após o segundo upload de junho, o gráfico começa a aparecer (o 1º upload é a base do acumulado).
+        </div>
+      </div>
+    )
+  }
+
+  const W = 680, H = 200, PADL = 56, PADR = 12, PADT = 10, PADB = 26
+  const maxV = Math.max(...linhas.map(l => Math.max(l.prodDia, l.digDia)), 1)
+  const innerW = W - PADL - PADR, innerH = H - PADT - PADB
+  const grupoW = innerW / linhas.length
+  const barW = Math.min(grupoW * 0.34, 40)
+  const fmtEixo = (v:number) => v>=1000000 ? `R$ ${(v/1000000).toFixed(1).replace('.',',')}mi` : v>=1000 ? `R$ ${Math.round(v/1000)}k` : `R$ ${Math.round(v)}`
+
+  const ticks = 4
+  const linhasGrade = Array.from({length:ticks+1},(_,i)=>{
+    const val = maxV * (i/ticks)
+    const y = PADT + innerH - (val/maxV)*innerH
+    return { y, val }
+  })
+
+  return (
+    <div style={{borderTop:'0.5px solid #f1f5f9',paddingTop:14,marginTop:14}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+        <div style={{fontSize:12,fontWeight:700,color:'#0f172a'}}>Bater de olho diário — produção e digitação por dia</div>
+        <div style={{fontSize:11,color:'#94a3b8'}}>jun/26 · operação inteira</div>
+      </div>
+      <div style={{display:'flex',gap:18,fontSize:11,color:'#64748b',marginBottom:10}}>
+        <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:11,height:11,borderRadius:2,background:'#185FA5'}}/>Produção do dia</span>
+        <span style={{display:'flex',alignItems:'center',gap:5}}><span style={{width:11,height:11,borderRadius:2,background:'#85B7EB'}}/>Digitação do dia</span>
+      </div>
+      <svg viewBox={`0 0 ${W} ${H}`} style={{width:'100%',height:'auto',display:'block'}}>
+        {linhasGrade.map((g,i)=>(
+          <g key={i}>
+            <line x1={PADL} y1={g.y} x2={W-PADR} y2={g.y} stroke="#eef2f6" strokeWidth="1"/>
+            <text x={PADL-8} y={g.y+3} textAnchor="end" fontSize="10" fill="#94a3b8">{fmtEixo(g.val)}</text>
+          </g>
+        ))}
+        {linhas.map((l,i)=>{
+          const cx = PADL + grupoW*i + grupoW/2
+          const hP = (l.prodDia/maxV)*innerH
+          const hD = (l.digDia/maxV)*innerH
+          const yP = PADT + innerH - hP
+          const yD = PADT + innerH - hD
+          return (
+            <g key={l.dia}>
+              <rect x={cx-barW-2} y={yP} width={barW} height={hP} rx="3" fill="#185FA5"/>
+              <rect x={cx+2} y={yD} width={barW} height={hD} rx="3" fill="#85B7EB"/>
+              <text x={cx} y={H-10} textAnchor="middle" fontSize="11" fill="#475569">{fmtDiaLabel(l.dia)}</text>
+            </g>
+          )
+        })}
+      </svg>
+      <div style={{display:'grid',gridTemplateColumns:`repeat(${Math.min(linhas.length,4)},1fr)`,gap:10,marginTop:12}}>
+        {linhas.slice(-4).map(l=>(
+          <div key={l.dia} style={{background:'#f8fafc',borderRadius:8,padding:'9px 11px',border:'0.5px solid #f1f5f9'}}>
+            <div style={{fontSize:11,color:'#94a3b8'}}>{fmtDiaLabel(l.dia)}</div>
+            <div style={{fontSize:14,fontWeight:700,color:'#0f172a'}}>{brlK(l.prodDia)} <span style={{fontSize:11,fontWeight:400,color:'#94a3b8'}}>prod</span></div>
+            <div style={{fontSize:12,color:'#64748b'}}>{brlK(l.digDia)} dig</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── ABA GERENCIAL — DASHBOARD DE GESTÃO ──────────────────────────────────────
 function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parceiro[];loading:boolean;onAbrirFicha:(p:Parceiro)=>void;onNavegar:(tab:Tab,filtros?:{quadrante?:string;topN?:number;zerados?:boolean})=>void}) {
   if(loading) return <div style={{textAlign:'center',padding:'60px',color:'#94a3b8'}}>Carregando...</div>
@@ -516,15 +612,12 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
   const nomes=['','jan','fev','mar','abr','mai','jun','jul','ago','set','out','nov','dez']
   const mesAtualNome=`${nomes[hoje.getMonth()+1]}/${String(hoje.getFullYear()).slice(2)}`
 
-  // Helpers
   const meses=parceiros[0]?.meses_display||[]
   const prodMesAtual=(p:any)=>p.meses_display?.[3]?.prod||0
   const digMesAtual=(p:any)=>p.meses_display?.[3]?.dig||0
   const potencialDe=(p:any)=>(p as any).potencial||Math.max(p.pico_2025||0,...(p.meses_display||[]).map((m:any)=>m.prod||0))
   const mesAntProd=(p:any)=>p.meses_display?.[2]?.prod||0
 
-  // BLOCO 1 — Saúde do mês
-  // Pro-rata: quantos dias úteis já passaram do mês corrente
   const duMes:Record<number,number>={1:21,2:19,3:21,4:20,5:20,6:19,7:23,8:21,9:22,10:22,11:19,12:22}
   const duTotal=duMes[hoje.getMonth()+1]||20
   let duDecorridos=0
@@ -538,13 +631,12 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
   const ritmoPct=proRataEsperado>0?((totalProdMes-proRataEsperado)/proRataEsperado*100):0
   const pctMeta=totalMeta>0?(totalProj/totalMeta*100):0
 
-  // BLOCO 2 — Ação necessária (Top 15 por impacto)
-  // Impacto = potencial × (1 - realização). Quem tem grande potencial e está entregando pouco = alto impacto
   const ranking=parceiros
     .filter(p=>potencialDe(p)>0)
     .map(p=>{
       const pot=potencialDe(p)
       const atual=prodMesAtual(p)
+      const digAtual=digMesAtual(p)
       const realizacao=pot>0?atual/pot:1
       const impacto=pot*(1-Math.min(realizacao,1))
       let motivo=''
@@ -552,12 +644,11 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
       else if(atual<pot*0.3) motivo=`Realizando ${(realizacao*100).toFixed(0)}% do pico`
       else if(mesAntProd(p)>0&&atual<mesAntProd(p)*0.5) motivo=`Caiu ${Math.round((1-atual/mesAntProd(p))*100)}% vs mês ant.`
       else motivo='—'
-      return {p,impacto,motivo,pot,atual}
+      return {p,impacto,motivo,pot,atual,digAtual}
     })
     .sort((a,b)=>b.impacto-a.impacto)
     .slice(0,15)
 
-  // BLOCO 3 — Resumo por gestor
   const GESTORES=[
     {key:'VALERIA',label:'Valéria',initials:'VA',bg:'#dbeafe',color:'#0c447c'},
     {key:'PEDRO',  label:'Pedro',  initials:'PE',bg:'#fef3c7',color:'#78350f'},
@@ -574,7 +665,6 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
     return {gp,prodAtual,proj,ativos,zerados,tendencia,total:gp.length}
   }
 
-  // BLOCO 4 — Concentração
   const ordenados=[...parceiros].sort((a,b)=>prodMesAtual(b)-prodMesAtual(a))
   const top5=ordenados.slice(0,5).reduce((a,p)=>a+prodMesAtual(p),0)
   const top10=ordenados.slice(0,10).reduce((a,p)=>a+prodMesAtual(p),0)
@@ -584,7 +674,6 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
   const pct20=totalProdMes>0?top20/totalProdMes*100:0
   const corConc=pct5>=60?'#dc2626':pct5>=40?'#b45309':'#15803d'
 
-  // BLOCO 5 — Quadrantes
   const Q_INFO:Record<string,{label:string;desc:string;color:string;bg:string;border:string}>={
     Q1:{label:'Alerta Máximo',desc:'Dig E prod zeraram',color:'#7f1d1d',bg:'#fee2e2',border:'#fca5a5'},
     Q2:{label:'Alerta',desc:'Ambas caíram',color:'#78350f',bg:'#fef3c7',border:'#fcd34d'},
@@ -602,7 +691,7 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
   return (
     <div style={{display:'flex',flexDirection:'column',gap:14}}>
 
-      {/* BLOCO 1 — SAÚDE DO MÊS */}
+      {/* BLOCO 1 — SAÚDE DO MÊS + GRÁFICO DIÁRIO */}
       <div style={{background:'#fff',borderRadius:12,padding:'16px 20px',border:'0.5px solid #e8ecf0',boxShadow:'0 1px 4px rgba(0,0,0,0.05)'}}>
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:14}}>
           <div>
@@ -628,6 +717,7 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
             </div>
           ))}
         </div>
+        <GraficoDiario parceiros={parceiros}/>
       </div>
 
       {/* BLOCO 2 — AÇÃO NECESSÁRIA (Top 15) */}
@@ -660,7 +750,10 @@ function AbaGerencial({parceiros,loading,onAbrirFicha,onNavegar}:{parceiros:Parc
                   <div style={{fontSize:10,color:'#94a3b8'}}>#{r.p.nr} · {r.p.promotora}/{r.p.loja}</div>
                 </td>
                 <td style={{padding:'9px 14px',textAlign:'right',fontWeight:700,color:'#0f172a'}}>{brl(r.pot)}</td>
-                <td style={{padding:'9px 14px',textAlign:'right',fontWeight:600,color:r.atual>0?'#0f172a':'#dc2626'}}>{r.atual>0?brl(r.atual):'R$ 0'}</td>
+                <td style={{padding:'9px 14px',textAlign:'right'}}>
+                  <div style={{fontWeight:600,color:r.atual>0?'#0f172a':'#dc2626'}}>{r.atual>0?brl(r.atual):'R$ 0'}</div>
+                  <div style={{fontSize:10,color:'#94a3b8',marginTop:1}}>{brl(r.digAtual)} dig.</div>
+                </td>
                 <td style={{padding:'9px 14px',color:'#64748b',fontSize:11}}>{r.motivo}</td>
                 <td style={{padding:'9px 14px'}}>{r.p.status?<StatusBadge status={r.p.status} tiny/>:<span style={{fontSize:10,color:'#94a3b8',fontStyle:'italic'}}>sem tab.</span>}</td>
                 <td style={{padding:'9px 14px',textAlign:'right'}}><ChevronRight style={{width:13,height:13,color:'#cbd5e1'}}/></td>
@@ -849,7 +942,6 @@ function DropZ({label,desc,obrig,arq,onChange,onRemove}:{label:string;desc:strin
 }
 
 // ── ABA UPLOAD ───────────────────────────────────────────────────────────────
-// Configuração mensal — SEM Base 2025 (fica no Redis)
 const CFGS_MENSAL=[
   {id:'nova_dig', label:'Nova — Digitação', desc:'digitação_nova.xlsx', obrig:true},
   {id:'nova_prod',label:'Nova — Produção',  desc:'produção_nova.xlsx',  obrig:true},
@@ -860,20 +952,16 @@ const CFGS_MENSAL=[
 
 function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
   const hoje=new Date()
-
-  // ── Seletor de mês real ──
-  const [mesSel,  setMesSel  ]=useState(hoje.getMonth()+1)   // 1-12
+  const [mesSel,  setMesSel  ]=useState(hoje.getMonth()+1)
   const [anoSel,  setAnoSel  ]=useState(hoje.getFullYear())
   const mesRef=`${String(mesSel).padStart(2,'0')}/${anoSel}`
 
   const nomesMes=['','Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro']
   const anos=[hoje.getFullYear()-1,hoje.getFullYear(),hoje.getFullYear()+1]
 
-  // ── Arquivos mensais ──
   const [arqs,setArqs]=useState<Record<string,FE>>({})
   const [du,setDu]=useState(20)
 
-  // ── Processamento mensal ──
   const [processando,setProcessando]=useState(false)
   const [resultado,setResultado]=useState<{ok:boolean;msg:string}|null>(null)
   const [log,setLog]=useState<string[]>([])
@@ -901,23 +989,16 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
     const fator=DU_TOT/du
     const parceiros:any[]=[]
 
-    // Base 2025 embutida no código — sem upload, sem Redis
     const bIdx:Record<string,any>=BASE_2025
     addLog(`Base 2025: ${Object.keys(bIdx).length} registros (fixos)`)
 
-    // Nova
     const nd=arqs['nova_dig']?.data;const np=arqs['nova_prod']?.data
     if(nd&&np){
       addLog('Nova: processando...')
 
-      // Detectar formato automaticamente pelo cabeçalho
-      // Storm (antigo): Nº | Loja | Lugar | Nome | Contratos | Produção Bruta | Lanc | Prod Líq | Valor Base (9 colunas)
-      // Bot (novo):     Nr Corretor | Nome | Loja | Valor Digitacao/Producao (R$) (4 colunas)
       const detectarFormato=(rows:any[][]):'storm'|'bot'=>{
         const hdr=(rows[0]||[]).map((c:any)=>String(c||'').toLowerCase())
-        // Bot tem cabeçalho com "Nr Corretor" como primeira coluna
         if(hdr[0]?.includes('corretor')&&hdr.length<=5)return 'bot'
-        // Storm tem "Nº" como primeira coluna e mais colunas
         return 'storm'
       }
       const fmtDig=detectarFormato(nd)
@@ -927,26 +1008,20 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
       const dM:Record<number,[string,number,string]>={}
       const pM:Record<number,[string,number,string]>={}
 
-      // Mapear digitação
       nd.slice(1).forEach((r:any[])=>{
         const nr=parseInt(r[0]);if(isNaN(nr))return
         if(fmtDig==='bot'){
-          // r[0]=nr, r[1]=nome, r[2]=loja, r[3]=valor
           dM[nr]=[String(r[1]||''),parseFloat(r[3])||0,String(r[2]||'')]
         }else{
-          // Storm: r[0]=nr, r[1]=loja, r[3]=nome, r[5]=Produção Bruta (digitação)
           dM[nr]=[String(r[3]||''),parseFloat(r[5])||0,String(r[1]||'')]
         }
       })
 
-      // Mapear produção
       np.slice(1).forEach((r:any[])=>{
         const nr=parseInt(r[0]);if(isNaN(nr))return
         if(fmtProd==='bot'){
-          // r[0]=nr, r[1]=nome, r[2]=loja, r[3]=valor
           pM[nr]=[String(r[1]||''),parseFloat(r[3])||0,String(r[2]||'')]
         }else{
-          // Storm: r[0]=nr, r[1]=loja, r[3]=nome, r[8]=Valor Base (produção)
           pM[nr]=[String(r[3]||''),parseFloat(r[8])||0,String(r[1]||'')]
         }
       })
@@ -967,7 +1042,6 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
       addLog(`Nova: ${parceiros.filter((p:any)=>p.promotora==='Nova').length} parceiros`)
     }
 
-    // GLM
     const glm=arqs['glm']?.data
     if(glm){
       addLog('GLM: processando...')
@@ -986,7 +1060,6 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
       })
     }
 
-    // Enriquecer com Base 2025 do Redis
     if(Object.keys(bIdx).length>0){
       addLog('Enriquecendo com Base 2025...')
       let matched=0
@@ -1017,12 +1090,9 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
 
   return (
     <div style={{display:'flex',flexDirection:'column',gap:12}}>
-
-      {/* ── SEÇÃO UPLOAD MENSAL ── */}
       <div style={{background:'#fff',borderRadius:12,border:'0.5px solid #e8ecf0',padding:'14px 16px'}}>
         <div style={{fontSize:13,fontWeight:700,color:'#0f172a',marginBottom:10}}>Atualizar dados mensais</div>
 
-        {/* Seletor de mês REAL */}
         <div style={{display:'flex',alignItems:'center',gap:8,marginBottom:12,flexWrap:'wrap'}}>
           <span style={{fontSize:11,color:'#64748b',fontWeight:600}}>Mês de referência:</span>
           <select value={mesSel} onChange={e=>setMesSel(Number(e.target.value))}
@@ -1038,7 +1108,6 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
           </span>
         </div>
 
-        {/* Dias úteis */}
         <div style={{display:'flex',alignItems:'center',gap:10,flexWrap:'wrap',marginBottom:12}}>
           <span style={{fontSize:11,color:'#64748b',fontWeight:500}}>Dias úteis:</span>
           <div style={{display:'flex',gap:3,flexWrap:'wrap'}}>
@@ -1049,14 +1118,12 @@ function AbaUpload({onDadosAtualizados}:{onDadosAtualizados:()=>void}) {
           <span style={{fontSize:11,color:'#94a3b8'}}>→ fator {(DU_TOT/du).toFixed(2)}×</span>
         </div>
 
-        {/* Arquivos mensais */}
         <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:9,marginBottom:12}}>
           {CFGS_MENSAL.map(cfg=><DropZ key={cfg.id} label={cfg.label} desc={cfg.desc} obrig={cfg.obrig}
             arq={arqs[cfg.id]} onChange={files=>onDropMensal(cfg.id,files)}
             onRemove={()=>setArqs(prev=>{const n={...prev};delete n[cfg.id];return n})}/>)}
         </div>
 
-        {/* Botão processar */}
         <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:log.length?12:0}}>
           <div style={{fontSize:12,color:'#64748b'}}>
             {!temObrig
@@ -1102,7 +1169,6 @@ export default function Page() {
   useEffect(()=>{load()},[load])
   const update=(p:Parceiro)=>{setParceiros(prev=>prev.map(x=>x.id===p.id?p:x));setFicha(prev=>prev&&prev.id===p.id?p:prev)}
   const navegarPara=(novaTab:Tab,filtros:{quadrante?:string;topN?:number;zerados?:boolean}={})=>{setFiltroPre(filtros);setTab(novaTab)}
-  // Limpar filtro pré quando trocar de aba manualmente
   const trocarTab=(t:Tab)=>{setFiltroPre({});setTab(t)}
   return (
     <div style={{minHeight:'100vh',background:'#f0f2f5',fontFamily:'var(--font-sans,system-ui)'}}>
