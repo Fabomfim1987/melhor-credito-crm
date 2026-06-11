@@ -58,6 +58,49 @@ export async function GET(req: NextRequest) {
     return count || 1
   }
 
+  // ── RÉGUA DE QUADRANTES (recalculada no backend) ──────────────────────────
+  // Baliza tudo contra a MELHOR marca histórica do parceiro.
+  //   Produção: maior entre pico_2025 e os meses recentes (= potencial)
+  //   Digitação: maior digitação entre os meses recentes (não há dig 2025 disponível)
+  // Corte de 80%: estar >= 80% da melhor marca = "forte" naquele eixo.
+  const CORTE = 0.80
+  function classificarQuadrante(args:{
+    projProd:number; potencial:number;
+    digAtual:number; melhorDig:number;
+    prodAtual:number; temHistorico:boolean;
+  }):{ q:string; novo:boolean } {
+    const { projProd, potencial, digAtual, melhorDig, prodAtual, temHistorico } = args
+
+    // NOVO: sem nenhuma referência histórica (sem pico, sem dig passada) mas com movimento agora
+    const semBaseProd = potencial <= 0
+    const semBaseDig  = melhorDig <= 0
+    if (semBaseProd && semBaseDig) {
+      if (prodAtual > 0 || digAtual > 0) return { q:'Q5', novo:true } // novo na carteira
+      return { q:'Q6', novo:false } // sem base e sem movimento = base morta
+    }
+
+    // Q1 — Alerta máximo: parou os dois eixos por completo
+    if (prodAtual <= 0 && digAtual <= 0) return { q:'Q1', novo:false }
+
+    // Eixos fortes? (>= 80% da melhor marca)
+    const prodForte = potencial > 0 && (projProd / potencial) >= CORTE
+    const digForte  = melhorDig > 0 && (digAtual / melhorDig) >= CORTE
+
+    // Q5 — Saudável: os dois eixos no ritmo da melhor marca (ou um forte sem base no outro)
+    if (prodForte && digForte) return { q:'Q5', novo:false }
+    if (prodForte && semBaseDig) return { q:'Q5', novo:false }
+    if (digForte && semBaseProd) return { q:'Q5', novo:false }
+
+    // Q3 — Dig OK / Prod baixa: digitando bem, produção ainda não converteu
+    if (digForte && !prodForte) return { q:'Q3', novo:false }
+
+    // Q4 — Conversão residual: ainda produz (estoque), mas digitação caiu
+    if (prodForte && !digForte) return { q:'Q4', novo:false }
+
+    // Q2 — Alerta: os dois eixos caíram (abaixo de 80%) mas ainda há algum movimento
+    return { q:'Q2', novo:false }
+  }
+
   // Enriquecer cada parceiro
   const parceiros = parceirosRaw.map(p => {
     const md = ultimos4.map(slot => ({ mes:slot, prod:p.historico_mensal?.[slot]?.prod||0, dig:p.historico_mensal?.[slot]?.dig||0 }))
@@ -82,8 +125,27 @@ export async function GET(req: NextRequest) {
       ...md.map(m => m.prod || 0)
     )
 
+    // Melhor digitação histórica: maior digitação entre os meses recentes
+    // (anteriores ao mês atual — para comparar o mês corrente contra o passado dele)
+    const melhorDig = Math.max(
+      0,
+      ...md.slice(0, 3).map(m => m.dig || 0)
+    )
+    // Se não há digitação anterior, usar a maior de todos os meses como referência
+    const melhorDigRef = melhorDig > 0 ? melhorDig : Math.max(0, ...md.map(m => m.dig || 0))
+
     // Gap = potencial - mês atual (quanto falta para voltar ao pico)
     const gapProd = potencial - prodAtual
+
+    // Tem histórico real?
+    const temHistorico = (p.pico_2025 || 0) > 0 || md.slice(0,3).some(m => (m.prod||0) > 0 || (m.dig||0) > 0)
+
+    // Classificação dos quadrantes (régua nova, balizada contra a melhor marca)
+    const { q, novo } = classificarQuadrante({
+      projProd, potencial,
+      digAtual, melhorDig: melhorDigRef,
+      prodAtual, temHistorico,
+    })
 
     return {
       ...p,
@@ -92,7 +154,10 @@ export async function GET(req: NextRequest) {
       proj_prod: projProd,
       proj_dig: projDig,
       potencial,
+      melhor_dig: melhorDigRef,
       gap_prod: gapProd,
+      quadrante: q,        // SOBRESCREVE o quadrante gravado no upload (régua antiga)
+      is_novo: novo,       // flag para "novo na carteira" (sem histórico)
     }
   })
 
